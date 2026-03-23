@@ -5,10 +5,12 @@ import Sidebar from "@/components/Sidebar";
 import ScriptCard from "@/components/ScriptCard";
 import ImageCard from "@/components/ImageCard";
 import VideoCard from "@/components/VideoCard";
+import TimelineEditor from "@/components/TimelineEditor";
+import ExportPanel from "@/components/ExportPanel";
 import { generateScript, generateImages, checkImageStatus, editImage, getActors, generateVideo, checkVideoStatus, generateVoice, getVoices, generateBroll, checkBrollStatus, unifyVoice, checkUnifyStatus } from "@/lib/api";
-import type { Actor, VoicePreset } from "@/lib/api";
+import type { Actor, VoicePreset, CompileClip } from "@/lib/api";
 import type { Message } from "@/lib/mock-data";
-import { Send, FileText, Image, Video, Mic, Paperclip, Sparkles, Loader2, Play, Combine } from "lucide-react";
+import { Send, FileText, Image, Video, Mic, Paperclip, Sparkles, Loader2, Play, Combine, Scissors } from "lucide-react";
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -57,6 +59,11 @@ export default function Home() {
 
   // Voice unification state
   const [isUnifyingVoice, setIsUnifyingVoice] = useState(false);
+
+  // Timeline / Edit state
+  const [timelineClips, setTimelineClips] = useState<(CompileClip & { id: string; name: string; thumbnailUrl?: string })[]>([]);
+  const [fullScriptText, setFullScriptText] = useState("");
+  const [unifiedVoiceUrl, setUnifiedVoiceUrl] = useState("");
 
   // Load actors and voices on mount
   useEffect(() => {
@@ -1277,6 +1284,89 @@ export default function Home() {
                   </button>
                 </div>
               )}
+              {activeQuickAction === "edit" && (
+                <div className="space-y-4">
+                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Edit & Compile Timeline</p>
+                  {(() => {
+                    // Collect all completed video clips from messages
+                    const videoClips = messages
+                      .filter(m => m.content === "video" && m.data?.status === "complete" && m.data?.videoUrl)
+                      .map((m, i) => ({
+                        id: `clip-${i}`,
+                        type: (m.data.shotName?.toLowerCase().includes("b-roll") ? "b-roll" : "a-roll") as "a-roll" | "b-roll",
+                        videoUrl: m.data.videoUrl,
+                        startTime: 0,
+                        duration: parseInt(m.data.duration) || 8,
+                        name: m.data.shotName || `Clip ${i + 1}`,
+                        thumbnailUrl: m.data.thumbnailUrl,
+                      }));
+                    
+                    // Recalc start times
+                    let t = 0;
+                    for (const c of videoClips) { c.startTime = t; t += c.duration; }
+
+                    // Get unified voiceover and full script
+                    const unifiedAudio = messages.find(m => m.content === "audio" && m.data?.voice?.includes("Unified") && m.data?.audioUrl);
+                    const scriptMsg = messages.find(m => m.content === "script" && m.data);
+                    const script = scriptMsg?.data
+                      ? `${scriptMsg.data.hook || ''} ${scriptMsg.data.body || ''} ${scriptMsg.data.cta || ''}`
+                      : '';
+
+                    if (videoClips.length === 0) {
+                      return (
+                        <p className="text-[11px] text-[#666]">
+                          No completed video clips found. Generate some videos first, then come back to compile.
+                        </p>
+                      );
+                    }
+
+                    // Auto-set timeline clips if empty
+                    if (timelineClips.length === 0 && videoClips.length > 0) {
+                      setTimeout(() => {
+                        setTimelineClips(videoClips);
+                        if (script) setFullScriptText(script);
+                        if (unifiedAudio?.data?.audioUrl) setUnifiedVoiceUrl(unifiedAudio.data.audioUrl);
+                      }, 0);
+                    }
+
+                    return (
+                      <div className="space-y-4">
+                        <TimelineEditor
+                          clips={timelineClips.length > 0 ? timelineClips : videoClips}
+                          onClipsChange={setTimelineClips}
+                        />
+                        <ExportPanel
+                          clips={timelineClips.length > 0 ? timelineClips : videoClips}
+                          scriptText={fullScriptText || script}
+                          voiceoverUrl={unifiedVoiceUrl || unifiedAudio?.data?.audioUrl}
+                          onCompileComplete={(url) => {
+                            setMessages((prev) => [
+                              ...prev,
+                              {
+                                id: String(Date.now()),
+                                role: "assistant",
+                                content: "video",
+                                data: {
+                                  shotName: "Final Compiled Ad",
+                                  engine: "FFmpeg",
+                                  duration: "...",
+                                  resolution: "1080x1920",
+                                  cost: "Free",
+                                  voice: "-",
+                                  status: "complete",
+                                  progress: 100,
+                                  thumbnailUrl: "",
+                                  videoUrl: url,
+                                },
+                              },
+                            ]);
+                          }}
+                        />
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1292,6 +1382,7 @@ export default function Home() {
               { id: "broll", icon: Play, label: "B-Roll" },
               { id: "voice", icon: Mic, label: "Voice" },
               { id: "unify", icon: Combine, label: "Unify Voice" },
+              { id: "edit", icon: Scissors, label: "Edit & Compile" },
             ].map(({ id, icon: Icon, label }) => (
               <button
                 key={id}
