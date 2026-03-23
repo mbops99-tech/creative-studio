@@ -5,10 +5,10 @@ import Sidebar from "@/components/Sidebar";
 import ScriptCard from "@/components/ScriptCard";
 import ImageCard from "@/components/ImageCard";
 import VideoCard from "@/components/VideoCard";
-import { generateScript, generateImages, checkImageStatus, editImage, getActors, generateVideo, checkVideoStatus, generateVoice, getVoices } from "@/lib/api";
+import { generateScript, generateImages, checkImageStatus, editImage, getActors, generateVideo, checkVideoStatus, generateVoice, getVoices, generateBroll, checkBrollStatus, unifyVoice, checkUnifyStatus } from "@/lib/api";
 import type { Actor, VoicePreset } from "@/lib/api";
 import type { Message } from "@/lib/mock-data";
-import { Send, FileText, Image, Video, Mic, Paperclip, Sparkles, Loader2 } from "lucide-react";
+import { Send, FileText, Image, Video, Mic, Paperclip, Sparkles, Loader2, Play, Combine } from "lucide-react";
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -48,6 +48,15 @@ export default function Home() {
   const [voiceText, setVoiceText] = useState("");
   const [voiceSelected, setVoiceSelected] = useState("aria");
   const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
+
+  // B-Roll form state
+  const [brollImageUrl, setBrollImageUrl] = useState("");
+  const [brollAction, setBrollAction] = useState("");
+  const [brollDuration, setBrollDuration] = useState(5);
+  const [isGeneratingBroll, setIsGeneratingBroll] = useState(false);
+
+  // Voice unification state
+  const [isUnifyingVoice, setIsUnifyingVoice] = useState(false);
 
   // Load actors and voices on mount
   useEffect(() => {
@@ -206,6 +215,308 @@ export default function Home() {
     setVideoScript(script);
     setVideoAction(action);
     setActiveQuickAction("video");
+  };
+
+  // Called from ScriptCard shotlist "Motion" button (B-roll)
+  const handleShotBrollGenerate = (shotName: string, action: string) => {
+    setBrollAction(action);
+    // Try to find last generated image to use
+    let imgUrl = "";
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.content === "image" && msg.data?.variations?.length > 0) {
+        const selected = msg.data.variations.find((v: { selected?: boolean }) => v.selected);
+        imgUrl = selected?.url || msg.data.variations[0].url;
+        break;
+      }
+    }
+    if (imgUrl) {
+      // Auto-generate B-roll
+      handleGenerateBroll(imgUrl, action, shotName);
+    } else {
+      // First generate the image
+      handleGenerateImage(action, shotName);
+    }
+  };
+
+  // Poll for B-Roll generation status
+  const pollBrollStatus = useCallback(async (jobId: string, loadingMsgId: string, shotName: string) => {
+    const poll = async () => {
+      try {
+        const status = await checkBrollStatus(jobId);
+        if (status.status === "processing") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === loadingMsgId
+                ? {
+                    ...m,
+                    content: "video",
+                    data: {
+                      shotName,
+                      engine: "Ken Burns (ffmpeg)",
+                      duration: "...",
+                      resolution: "768x1024",
+                      cost: "Free",
+                      voice: "—",
+                      status: "generating",
+                      progress: status.progress || 0,
+                      step: status.step,
+                      thumbnailUrl: "",
+                    },
+                  }
+                : m
+            )
+          );
+          setTimeout(poll, 2000);
+        } else if (status.status === "complete") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === loadingMsgId
+                ? {
+                    ...m,
+                    content: "video",
+                    data: {
+                      shotName,
+                      engine: status.engine || "Ken Burns",
+                      duration: status.duration || "5s",
+                      resolution: "768x1024",
+                      cost: "Free",
+                      voice: "—",
+                      status: "complete",
+                      progress: 100,
+                      thumbnailUrl: "",
+                      videoUrl: status.videoUrl,
+                      effect: status.effect,
+                    },
+                  }
+                : m
+            )
+          );
+          setIsGeneratingBroll(false);
+        } else if (status.status === "failed") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === loadingMsgId
+                ? {
+                    ...m,
+                    content: `B-Roll generation failed: ${status.error || "Unknown error"}`,
+                    data: undefined,
+                  }
+                : m
+            )
+          );
+          setIsGeneratingBroll(false);
+        } else {
+          setTimeout(poll, 2000);
+        }
+      } catch (err) {
+        console.error("B-Roll poll error:", err);
+        setTimeout(poll, 3000);
+      }
+    };
+    setTimeout(poll, 2000);
+  }, []);
+
+  const handleGenerateBroll = async (imageUrl?: string, actionPrompt?: string, shotName?: string) => {
+    const imgUrl = imageUrl || brollImageUrl;
+    const action = actionPrompt || brollAction;
+    const name = shotName || "B-Roll";
+
+    if (!imgUrl) {
+      // Try to find the last generated image
+      let foundUrl = "";
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg.content === "image" && msg.data?.variations?.length > 0) {
+          const selected = msg.data.variations.find((v: { selected?: boolean }) => v.selected);
+          foundUrl = selected?.url || msg.data.variations[0].url;
+          break;
+        }
+      }
+      if (!foundUrl) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: String(Date.now()),
+            role: "assistant" as const,
+            content: "Please generate or provide an image first — I need a source image for the B-Roll motion video.",
+          },
+        ]);
+        return;
+      }
+    }
+
+    const finalImgUrl = imgUrl || "";
+
+    const userMsg: Message = {
+      id: String(Date.now()),
+      role: "user",
+      content: `Generate B-Roll motion video: "${action || 'zoom in'}"`,
+    };
+
+    const loadingMsgId = String(Date.now() + 1);
+    const loadingMsg: Message = {
+      id: loadingMsgId,
+      role: "assistant",
+      content: "video",
+      data: {
+        shotName: name,
+        engine: "Ken Burns (ffmpeg)",
+        duration: `${brollDuration}s`,
+        resolution: "768x1024",
+        cost: "Free",
+        voice: "—",
+        status: "generating",
+        progress: 0,
+        step: "Starting...",
+        thumbnailUrl: "",
+      },
+    };
+
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setActiveQuickAction(null);
+    setIsGeneratingBroll(true);
+
+    try {
+      const jobId = await generateBroll(finalImgUrl, action || "zoom in", brollDuration);
+      pollBrollStatus(jobId, loadingMsgId, name);
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === loadingMsgId
+            ? {
+                ...m,
+                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
+                data: undefined,
+              }
+            : m
+        )
+      );
+      setIsGeneratingBroll(false);
+    }
+  };
+
+  // --- Voice Unification ---
+  const handleUnifyVoice = async () => {
+    // Collect all audio URLs from messages
+    const audioUrls: string[] = [];
+    for (const msg of messages) {
+      if (msg.content === "audio" && msg.data?.audioUrl) {
+        audioUrls.push(msg.data.audioUrl);
+      }
+      // Also check video messages that have audio
+      if (msg.content === "video" && msg.data?.status === "complete" && msg.data?.videoUrl) {
+        // Videos contain their own audio, skip
+      }
+    }
+
+    if (audioUrls.length < 2) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: String(Date.now()),
+          role: "assistant" as const,
+          content: "Need at least 2 audio clips to unify. Generate more voiceovers first!",
+        },
+      ]);
+      return;
+    }
+
+    const userMsg: Message = {
+      id: String(Date.now()),
+      role: "user",
+      content: `Unify ${audioUrls.length} voice clips into one seamless track`,
+    };
+
+    const loadingMsgId = String(Date.now() + 1);
+    const loadingMsg: Message = {
+      id: loadingMsgId,
+      role: "assistant",
+      content: "loading",
+    };
+
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setIsUnifyingVoice(true);
+
+    try {
+      // Convert absolute URLs back to relative for API
+      const relativeUrls = audioUrls.map((url) => {
+        const base = process.env.NEXT_PUBLIC_API_URL || "http://151.247.196.131:5010";
+        return url.startsWith(base) ? url.replace(base, "") : url;
+      });
+
+      const jobId = await unifyVoice(relativeUrls, voiceSelected);
+
+      // Poll for completion
+      const poll = async () => {
+        try {
+          const status = await checkUnifyStatus(jobId);
+          if (status.status === "processing") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === loadingMsgId
+                  ? {
+                      ...m,
+                      content: "loading",
+                      data: { step: status.step, progress: status.progress },
+                    }
+                  : m
+              )
+            );
+            setTimeout(poll, 2000);
+          } else if (status.status === "complete") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === loadingMsgId
+                  ? {
+                      ...m,
+                      content: "audio",
+                      data: {
+                        audioUrl: status.audioUrl,
+                        voice: `Unified (${status.clipCount} clips)`,
+                        text: `${status.clipCount} clips merged • ${status.duration}`,
+                      },
+                    }
+                  : m
+              )
+            );
+            setIsUnifyingVoice(false);
+          } else if (status.status === "failed") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === loadingMsgId
+                  ? {
+                      ...m,
+                      content: `Voice unification failed: ${status.error || "Unknown error"}`,
+                      data: undefined,
+                    }
+                  : m
+              )
+            );
+            setIsUnifyingVoice(false);
+          } else {
+            setTimeout(poll, 2000);
+          }
+        } catch (err) {
+          console.error("Unify poll error:", err);
+          setTimeout(poll, 3000);
+        }
+      };
+      setTimeout(poll, 2000);
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === loadingMsgId
+            ? {
+                ...m,
+                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
+                data: undefined,
+              }
+            : m
+        )
+      );
+      setIsUnifyingVoice(false);
+    }
   };
 
   // Poll for video generation status
@@ -604,7 +915,7 @@ export default function Home() {
                       </div>
                     )}
                     {msg.content === "script" && msg.data && (
-                      <ScriptCard data={msg.data} onGenerateImage={handleShotImageGenerate} onGenerateVideo={handleShotVideoGenerate} />
+                      <ScriptCard data={msg.data} onGenerateImage={handleShotImageGenerate} onGenerateVideo={handleShotVideoGenerate} onGenerateBroll={handleShotBrollGenerate} />
                     )}
                     {msg.content === "image" && msg.data && (
                       <ImageCard
@@ -892,6 +1203,80 @@ export default function Home() {
                   </div>
                 </div>
               )}
+              {activeQuickAction === "broll" && (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate B-Roll Motion Video</p>
+                  <p className="text-[11px] text-[#666]">Turn a static image into a motion video with Ken Burns effects (zoom, pan, etc.)</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none col-span-2"
+                      placeholder="Image URL (or leave empty to use last generated image)..."
+                      value={brollImageUrl}
+                      onChange={(e) => setBrollImageUrl(e.target.value)}
+                    />
+                    <textarea
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-12 col-span-2"
+                      placeholder="Motion description (e.g. 'zoom in slowly', 'pan left', 'zoom out')..."
+                      value={brollAction}
+                      onChange={(e) => setBrollAction(e.target.value)}
+                    />
+                  </div>
+                  <div className="flex gap-2 items-center">
+                    <select
+                      className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none"
+                      value={brollDuration}
+                      onChange={(e) => setBrollDuration(Number(e.target.value))}
+                    >
+                      <option value={3}>3 seconds</option>
+                      <option value={5}>5 seconds</option>
+                      <option value={8}>8 seconds</option>
+                      <option value={10}>10 seconds</option>
+                    </select>
+                    <button
+                      onClick={() => handleGenerateBroll()}
+                      disabled={isGeneratingBroll}
+                      className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+                    >
+                      {isGeneratingBroll ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        "Generate B-Roll (Free)"
+                      )}
+                    </button>
+                  </div>
+                </div>
+              )}
+              {activeQuickAction === "unify" && (
+                <div className="space-y-3">
+                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Unify Voice Clips</p>
+                  <p className="text-[11px] text-[#666]">
+                    Merge all generated voiceover clips into one seamless audio track with normalized volume.
+                    {(() => {
+                      const count = messages.filter(m => m.content === "audio" && m.data?.audioUrl).length;
+                      return count > 0
+                        ? ` Found ${count} audio clip${count > 1 ? 's' : ''} in this session.`
+                        : ' No audio clips found yet — generate some voiceovers first.';
+                    })()}
+                  </p>
+                  <button
+                    onClick={handleUnifyVoice}
+                    disabled={isUnifyingVoice || messages.filter(m => m.content === "audio" && m.data?.audioUrl).length < 2}
+                    className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+                  >
+                    {isUnifyingVoice ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Unifying...
+                      </>
+                    ) : (
+                      "Unify Voice (Free)"
+                    )}
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -904,7 +1289,9 @@ export default function Home() {
               { id: "script", icon: FileText, label: "Script" },
               { id: "image", icon: Image, label: "Image" },
               { id: "video", icon: Video, label: "Video" },
+              { id: "broll", icon: Play, label: "B-Roll" },
               { id: "voice", icon: Mic, label: "Voice" },
+              { id: "unify", icon: Combine, label: "Unify Voice" },
             ].map(({ id, icon: Icon, label }) => (
               <button
                 key={id}

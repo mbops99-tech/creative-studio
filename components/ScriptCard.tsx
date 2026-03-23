@@ -10,15 +10,17 @@ import {
   Zap,
   ChevronDown,
   ChevronUp,
+  Play,
 } from "lucide-react";
 
 interface ScriptCardProps {
   data: ScriptData;
   onGenerateImage?: (shotName: string, action: string) => void;
   onGenerateVideo?: (shotName: string, script: string, action: string) => void;
+  onGenerateBroll?: (shotName: string, action: string) => void;
 }
 
-export default function ScriptCard({ data, onGenerateImage, onGenerateVideo }: ScriptCardProps) {
+export default function ScriptCard({ data, onGenerateImage, onGenerateVideo, onGenerateBroll }: ScriptCardProps) {
   const [expanded, setExpanded] = useState(true);
 
   return (
@@ -151,13 +153,23 @@ export default function ScriptCard({ data, onGenerateImage, onGenerateVideo }: S
                               <Image className="w-3 h-3" />
                               Image
                             </button>
-                            <button
-                              onClick={() => onGenerateVideo?.(shot.name, shot.script, shot.action)}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/5 hover:bg-purple/20 text-muted hover:text-purple transition-all text-[11px]"
-                            >
-                              <Video className="w-3 h-3" />
-                              Video
-                            </button>
+                            {shot.type === "A-roll" ? (
+                              <button
+                                onClick={() => onGenerateVideo?.(shot.name, shot.script, shot.action)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/5 hover:bg-purple/20 text-muted hover:text-purple transition-all text-[11px]"
+                              >
+                                <Video className="w-3 h-3" />
+                                Video
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => onGenerateBroll?.(shot.name, shot.action)}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/5 hover:bg-blue-500/20 text-muted hover:text-blue-400 transition-all text-[11px]"
+                              >
+                                <Play className="w-3 h-3" />
+                                Motion
+                              </button>
+                            )}
                           </div>
                         </td>
                       </tr>

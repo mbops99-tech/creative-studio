@@ -271,3 +271,186 @@ export async function getVoices(): Promise<VoicePreset[]> {
   const data = await apiGet("/api/voices");
   return data.voices;
 }
+
+// --- Edit / Timeline API ---
+
+export interface MusicTrack {
+  id: string;
+  name: string;
+  filename: string;
+  url: string;
+  duration: string;
+}
+
+export interface CompileClip {
+  type: "a-roll" | "b-roll";
+  videoUrl: string;
+  startTime: number;
+  duration: number;
+  overlay?: boolean;
+}
+
+export interface CompileAudio {
+  voiceover?: string;
+  music?: string;
+  musicVolume?: number;
+}
+
+export interface CompileCaptions {
+  enabled: boolean;
+  style: "tiktok-bold" | "minimal" | "karaoke" | "none";
+  text?: string;
+}
+
+export interface CompileStatus {
+  status: "processing" | "complete" | "failed";
+  progress: number;
+  step?: string;
+  videoUrl?: string;
+  duration?: string;
+  format?: string;
+  error?: string;
+}
+
+export interface ExportStatus {
+  status: "processing" | "complete" | "failed";
+  progress: number;
+  step?: string;
+  formatUrls?: Record<string, string>;
+  error?: string;
+}
+
+export async function getMusic(): Promise<MusicTrack[]> {
+  const data = await apiGet("/api/music");
+  return (data.tracks || []).map((t: MusicTrack) => ({
+    ...t,
+    url: t.url.startsWith("http") ? t.url : `${API_BASE}${t.url}`,
+  }));
+}
+
+export async function compileVideo(
+  clips: CompileClip[],
+  audio: CompileAudio,
+  captions: CompileCaptions,
+  format: string = "9:16",
+  resolution: string = "1080x1920"
+): Promise<string> {
+  const data = await apiFetch("/api/edit/compile", {
+    clips,
+    audio,
+    captions,
+    format,
+    resolution,
+  });
+  return data.jobId;
+}
+
+export async function checkCompileStatus(jobId: string): Promise<CompileStatus> {
+  const data = await apiGet(`/api/edit/status/${jobId}`);
+  if (data.videoUrl && !data.videoUrl.startsWith("http")) {
+    data.videoUrl = `${API_BASE}${data.videoUrl}`;
+  }
+  return data;
+}
+
+export async function generateCaptions(
+  script: string,
+  audioDuration: number,
+  style: string
+): Promise<string> {
+  const data = await apiFetch("/api/edit/caption", {
+    script,
+    audioDuration,
+    style,
+  });
+  return data.subtitleUrl.startsWith("http")
+    ? data.subtitleUrl
+    : `${API_BASE}${data.subtitleUrl}`;
+}
+
+export async function exportFormats(
+  videoUrl: string,
+  formats: string[]
+): Promise<string> {
+  const data = await apiFetch("/api/edit/export", { videoUrl, formats });
+  return data.jobId;
+}
+
+export async function checkExportStatus(jobId: string): Promise<ExportStatus> {
+  const data = await apiGet(`/api/edit/status/${jobId}`);
+  if (data.formatUrls) {
+    for (const key of Object.keys(data.formatUrls)) {
+      if (!data.formatUrls[key].startsWith("http")) {
+        data.formatUrls[key] = `${API_BASE}${data.formatUrls[key]}`;
+      }
+    }
+  }
+  return data;
+}
+
+// --- B-Roll (Motion Video) API ---
+
+export interface BrollJobStatus {
+  status: "pending" | "processing" | "complete" | "failed";
+  progress: number;
+  step?: string;
+  videoUrl?: string;
+  duration?: string;
+  effect?: string;
+  engine?: string;
+  error?: string;
+}
+
+export async function generateBroll(
+  imageUrl: string,
+  actionPrompt: string,
+  duration?: number,
+  engine?: "kenburns" | "animatediff"
+): Promise<string> {
+  const data = await apiFetch("/api/broll/generate", {
+    imageUrl,
+    actionPrompt,
+    duration: duration || 5,
+    engine: engine || "kenburns",
+  });
+  return data.jobId;
+}
+
+export async function checkBrollStatus(jobId: string): Promise<BrollJobStatus> {
+  const data = await apiGet(`/api/broll/status/${jobId}`);
+  if (data.videoUrl && !data.videoUrl.startsWith("http")) {
+    data.videoUrl = `${API_BASE}${data.videoUrl}`;
+  }
+  return data;
+}
+
+// --- Voice Unification API ---
+
+export interface VoiceUnifyJobStatus {
+  status: "pending" | "processing" | "complete" | "failed";
+  progress: number;
+  step?: string;
+  audioUrl?: string;
+  duration?: string;
+  clipCount?: number;
+  error?: string;
+}
+
+export async function unifyVoice(
+  audioUrls: string[],
+  targetVoice?: string
+): Promise<string> {
+  const data = await apiFetch("/api/voice/unify", {
+    audioUrls,
+    targetVoice,
+  });
+  return data.jobId;
+}
+
+export async function checkUnifyStatus(jobId: string): Promise<VoiceUnifyJobStatus> {
+  const data = await apiGet(`/api/voice/unify/status/${jobId}`);
+  if (data.audioUrl && !data.audioUrl.startsWith("http")) {
+    data.audioUrl = `${API_BASE}${data.audioUrl}`;
+  }
+  return data;
+}
