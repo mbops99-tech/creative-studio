@@ -10,7 +10,6 @@ import {
   Minus,
   Plus,
   ArrowUp,
-  CreditCard,
   Check,
   X,
   Info,
@@ -18,6 +17,8 @@ import {
   Music,
   FileText,
   Image as ImageIcon,
+  UserCheck,
+  Coins,
 } from "lucide-react";
 import type { Actor } from "@/lib/api";
 import type { ModeTab } from "./ModeTabs";
@@ -33,29 +34,24 @@ interface Model {
   description: string;
   costPerUnit: number;
   unit: string;
+  free?: boolean;
 }
 
 const AVATAR_MODELS: Model[] = [
   {
-    id: "speel-video",
-    name: "Speel Video",
-    description: "Standard lip sync model by Speel. Takes longer to create. Up to 1 min video length",
-    costPerUnit: 100,
+    id: "sadtalker",
+    name: "SadTalker",
+    description: "Open source lip sync, running on our GPU. Free to use.",
+    costPerUnit: 0,
     unit: "video",
+    free: true,
   },
   {
-    id: "omnihuman",
-    name: "OmniHuman 1.5",
-    description: "Fast film-grade lip sync model by ByteDance. 35s video length",
-    costPerUnit: 7,
-    unit: "second",
-  },
-  {
-    id: "wan",
-    name: "Wan 2.6",
-    description: "Fast lip sync with scene control. 15s max, 720p/1080p",
-    costPerUnit: 4,
-    unit: "second",
+    id: "kling",
+    name: "Kling 2.5",
+    description: "Best quality lip sync by Kuaishou. $0.50 per video.",
+    costPerUnit: 50,
+    unit: "video",
   },
 ];
 
@@ -63,14 +59,15 @@ const IMAGE_MODELS: Model[] = [
   {
     id: "comfyui",
     name: "ComfyUI",
-    description: "Local image generation pipeline. Free to use.",
+    description: "Local image generation on our GPU server. Free to use.",
     costPerUnit: 0,
     unit: "img",
+    free: true,
   },
   {
     id: "replicate",
     name: "Replicate",
-    description: "Cloud-based image generation ($0.05/img)",
+    description: "Cloud-based image generation. $0.05 per image.",
     costPerUnit: 5,
     unit: "img",
   },
@@ -101,6 +98,14 @@ export interface PromptSettings {
     voiceId?: string;
     voiceName?: string;
   };
+  scriptFields?: {
+    product: string;
+    audience: string;
+    outcome: string;
+    differentiator: string;
+    proof: string;
+    speed: string;
+  };
 }
 
 export default function PromptBar({
@@ -112,18 +117,18 @@ export default function PromptBar({
   isGenerating,
 }: PromptBarProps) {
   const [prompt, setPrompt] = useState("");
-  
+
   // Avatar models
-  const [avatarModel, setAvatarModel] = useState<Model>(AVATAR_MODELS[1]);
+  const [avatarModel, setAvatarModel] = useState<Model>(AVATAR_MODELS[0]);
   const [imageModel, setImageModel] = useState<Model>(IMAGE_MODELS[0]);
-  
+
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showSceneDirection, setShowSceneDirection] = useState(false);
   const [showAdditionalPrompts, setShowAdditionalPrompts] = useState(false);
   const [showAudioModal, setShowAudioModal] = useState(false);
   const [quantity, setQuantity] = useState(1);
-  
+
   const [settings, setSettings] = useState<PromptSettings>({
     orientation: "portrait",
     duration: "10s",
@@ -143,6 +148,17 @@ export default function PromptBar({
     voiceName?: string;
   } | null>(null);
 
+  // Script tab fields
+  const [scriptFields, setScriptFields] = useState({
+    product: "",
+    audience: "",
+    outcome: "",
+    differentiator: "",
+    proof: "",
+    speed: "",
+  });
+  const [showScriptFields, setShowScriptFields] = useState(false);
+
   // Upload ref for image tab
   const imageUploadRef = useRef<HTMLInputElement>(null);
   const [uploadedImage, setUploadedImage] = useState<File | null>(null);
@@ -157,7 +173,7 @@ export default function PromptBar({
     : (m: Model) => setImageModel(m);
 
   const placeholders: Record<ModeTab, string> = {
-    script: "Describe your product and target audience...",
+    script: "Describe your product and target audience for a UGC ad script...",
     "talking-avatar": "Describe the video you want to create. You can also drop or paste images directly here.",
     image: "Describe the image you want to create...",
     more: "Describe what you want to create...",
@@ -167,9 +183,16 @@ export default function PromptBar({
   const cost = selectedModel.costPerUnit * quantity;
 
   const handleSubmit = () => {
-    if (!prompt.trim() || isGenerating) return;
-    onSubmit(prompt, selectedModel.id, quantity, { ...settings, audioSource: audioSource || undefined });
-    setPrompt("");
+    if (activeTab === "script") {
+      const effectivePrompt = prompt.trim() || scriptFields.product;
+      if (!effectivePrompt || isGenerating) return;
+      onSubmit(effectivePrompt, "claude", 1, { ...settings, scriptFields });
+      setPrompt("");
+    } else {
+      if (!prompt.trim() || isGenerating) return;
+      onSubmit(prompt, selectedModel.id, quantity, { ...settings, audioSource: audioSource || undefined });
+      setPrompt("");
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -210,14 +233,13 @@ export default function PromptBar({
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <button
+        <GenerateButton
+          cost={0}
+          unit="script"
+          free
           onClick={handleSubmit}
-          disabled={!prompt.trim() || isGenerating}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple text-white text-[12px] font-medium hover:bg-purple-hover disabled:opacity-40 transition-all"
-        >
-          Generate
-          <ArrowUp className="w-3.5 h-3.5" />
-        </button>
+          disabled={(!prompt.trim() && !scriptFields.product) || isGenerating}
+        />
       </div>
     </div>
   );
@@ -234,6 +256,7 @@ export default function PromptBar({
           >
             <Sparkles className="w-3.5 h-3.5 text-purple" />
             {selectedModel.name}
+            {selectedModel.free && <span className="text-[10px] text-[#888]">(Free)</span>}
             <ChevronDown className="w-3 h-3 text-[#888]" />
           </button>
           {showModelDropdown && renderModelDropdown()}
@@ -248,7 +271,11 @@ export default function PromptBar({
           onClick={onOpenActorGallery}
           badge={selectedActors.length > 0}
         >
-          <Users className="w-4 h-4" />
+          {selectedActors.length > 0 ? (
+            <UserCheck className="w-4 h-4" />
+          ) : (
+            <Users className="w-4 h-4" />
+          )}
         </ToolbarButton>
 
         {/* Scene Direction */}
@@ -297,34 +324,18 @@ export default function PromptBar({
             />
           )}
         </div>
-
-        {/* Settings */}
-        <div className="relative">
-          <ToolbarButton tooltip="Settings" onClick={() => setShowSettings(!showSettings)}>
-            <SlidersHorizontal className="w-4 h-4" />
-          </ToolbarButton>
-          {showSettings && (
-            <SettingsPopup
-              activeTab="talking-avatar"
-              orientation={settings.orientation}
-              duration={settings.duration}
-              quality={settings.quality}
-              fastMode={settings.fastMode}
-              onOrientationChange={(v) => setSettings((s) => ({ ...s, orientation: v }))}
-              onDurationChange={(v) => setSettings((s) => ({ ...s, duration: v }))}
-              onQualityChange={(v) => setSettings((s) => ({ ...s, quality: v }))}
-              onFastModeChange={(v) => setSettings((s) => ({ ...s, fastMode: v }))}
-              onClose={() => setShowSettings(false)}
-            />
-          )}
-        </div>
       </div>
 
       {/* Right side */}
       <div className="flex items-center gap-3">
-        <span className="text-[11px] text-[#555]">{prompt.length} / 10,000</span>
         <QuantitySelector quantity={quantity} onChange={setQuantity} max={4} />
-        <GenerateButton cost={cost} unit={selectedModel.unit} onClick={handleSubmit} disabled={!prompt.trim() || isGenerating} />
+        <GenerateButton
+          cost={cost}
+          unit={selectedModel.unit}
+          free={selectedModel.free}
+          onClick={handleSubmit}
+          disabled={!prompt.trim() || isGenerating}
+        />
       </div>
     </div>
   );
@@ -341,6 +352,7 @@ export default function PromptBar({
           >
             <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
             {selectedModel.name}
+            {selectedModel.free && <span className="text-[10px] text-[#888]">(Free)</span>}
             <ChevronDown className="w-3 h-3 text-[#888]" />
           </button>
           {showModelDropdown && renderModelDropdown()}
@@ -348,7 +360,19 @@ export default function PromptBar({
 
         <div className="w-px h-5 bg-[#2a2a2a] mx-1" />
 
-        {/* Upload image */}
+        {/* Show character ref & image ref when image is uploaded */}
+        {uploadedImage && (
+          <>
+            <ToolbarButton tooltip="Character reference" onClick={() => {}}>
+              <Users className="w-4 h-4" />
+            </ToolbarButton>
+            <ToolbarButton tooltip="Image reference" onClick={() => {}}>
+              <ImageIcon className="w-4 h-4" />
+            </ToolbarButton>
+          </>
+        )}
+
+        {/* Upload image (only show when no image uploaded) */}
         <input
           ref={imageUploadRef}
           type="file"
@@ -359,13 +383,14 @@ export default function PromptBar({
             if (file) handleImageUpload(file);
           }}
         />
-        <ToolbarButton
-          active={!!uploadedImage}
-          tooltip="Upload image"
-          onClick={() => imageUploadRef.current?.click()}
-        >
-          <Upload className="w-4 h-4" />
-        </ToolbarButton>
+        {!uploadedImage && (
+          <ToolbarButton
+            tooltip="Upload image"
+            onClick={() => imageUploadRef.current?.click()}
+          >
+            <Upload className="w-4 h-4" />
+          </ToolbarButton>
+        )}
 
         {/* Settings */}
         <div className="relative">
@@ -395,7 +420,13 @@ export default function PromptBar({
       <div className="flex items-center gap-3">
         <span className="text-[11px] text-[#555]">{prompt.length} / 10,000</span>
         <QuantitySelector quantity={quantity} onChange={setQuantity} max={8} />
-        <GenerateButton cost={cost} unit={selectedModel.unit} onClick={handleSubmit} disabled={!prompt.trim() || isGenerating} />
+        <GenerateButton
+          cost={cost}
+          unit={selectedModel.unit}
+          free={selectedModel.free}
+          onClick={handleSubmit}
+          disabled={!prompt.trim() || isGenerating}
+        />
       </div>
     </div>
   );
@@ -410,14 +441,13 @@ export default function PromptBar({
         </div>
       </div>
       <div className="flex items-center gap-3">
-        <button
+        <GenerateButton
+          cost={0}
+          unit=""
+          free
           onClick={handleSubmit}
           disabled={!prompt.trim() || isGenerating}
-          className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-purple text-white text-[12px] font-medium hover:bg-purple-hover disabled:opacity-40 transition-all"
-        >
-          Generate
-          <ArrowUp className="w-3.5 h-3.5" />
-        </button>
+        />
       </div>
     </div>
   );
@@ -426,7 +456,7 @@ export default function PromptBar({
   const renderModelDropdown = () => (
     <>
       <div className="fixed inset-0 z-40" onClick={() => setShowModelDropdown(false)} />
-      <div className="absolute bottom-full left-0 mb-2 z-50 w-[300px] bg-[#1e1e22] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden animate-fade-in">
+      <div className="absolute bottom-full left-0 mb-2 z-50 w-[300px] bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden animate-fade-in">
         {currentModels.map((model) => (
           <button
             key={model.id}
@@ -434,8 +464,8 @@ export default function PromptBar({
               setSelectedModel(model);
               setShowModelDropdown(false);
             }}
-            className={`w-full flex items-start gap-3 px-4 py-3 hover:bg-[#252528] transition-colors text-left ${
-              selectedModel.id === model.id ? "bg-[#252528]" : ""
+            className={`w-full flex items-start gap-3 px-4 py-3 hover:bg-[#222] transition-colors text-left ${
+              selectedModel.id === model.id ? "bg-[#222]" : ""
             }`}
           >
             <div className="mt-0.5 shrink-0">
@@ -448,16 +478,19 @@ export default function PromptBar({
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-1.5">
                 <span className="text-[13px] font-medium text-white">{model.name}</span>
+                {model.free && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">Free</span>
+                )}
                 <Info className="w-3 h-3 text-[#555]" />
               </div>
               <p className="text-[11px] text-[#666] mt-0.5 leading-snug">{model.description}</p>
             </div>
             <div className="flex items-center gap-1 shrink-0 mt-0.5">
               <div className="w-4 h-4 rounded-full bg-amber-500/80 flex items-center justify-center">
-                <CreditCard className="w-2.5 h-2.5 text-white" />
+                <Coins className="w-2.5 h-2.5 text-white" />
               </div>
               <span className="text-[11px] text-[#888]">
-                {model.costPerUnit}/{model.unit}
+                {model.free ? "Free" : `${model.costPerUnit}/${model.unit}`}
               </span>
             </div>
           </button>
@@ -557,6 +590,46 @@ export default function PromptBar({
               rows={3}
               className="w-full bg-transparent text-[14px] text-white placeholder:text-[#555] focus:outline-none resize-none leading-relaxed"
             />
+
+            {/* Script tab expandable fields */}
+            {activeTab === "script" && (
+              <div className="mt-1 mb-2">
+                <button
+                  onClick={() => setShowScriptFields(!showScriptFields)}
+                  className="flex items-center gap-1.5 text-[12px] text-[#888] hover:text-white transition-colors"
+                >
+                  <ChevronDown className={`w-3 h-3 transition-transform ${showScriptFields ? "rotate-180" : ""}`} />
+                  {showScriptFields ? "Hide" : "Show"} detailed fields
+                </button>
+                {showScriptFields && (
+                  <div className="mt-3 space-y-3 animate-fade-in">
+                    {[
+                      { key: "product", label: "Product / Service", placeholder: "e.g. Desaire - AI girlfriend app" },
+                      { key: "audience", label: "Target Audience", placeholder: "e.g. Single men 18-35" },
+                      { key: "outcome", label: "Dream Outcome", placeholder: "e.g. Find meaningful companionship" },
+                      { key: "differentiator", label: "Differentiator", placeholder: "e.g. Remembers everything, always available" },
+                      { key: "proof", label: "Proof / Testimonials", placeholder: "e.g. 100k+ downloads, 4.8 stars" },
+                      { key: "speed", label: "Speed of Results", placeholder: "e.g. Start chatting in 30 seconds" },
+                    ].map((field) => (
+                      <div key={field.key}>
+                        <label className="text-[11px] text-[#888] font-medium mb-1 block">
+                          {field.label}
+                        </label>
+                        <input
+                          type="text"
+                          value={scriptFields[field.key as keyof typeof scriptFields]}
+                          onChange={(e) =>
+                            setScriptFields((prev) => ({ ...prev, [field.key]: e.target.value }))
+                          }
+                          placeholder={field.placeholder}
+                          className="w-full bg-[#0f0f0f] border border-[#2a2a2a] focus:border-[#4a90d9] rounded-lg px-3 py-2 text-[12px] text-white placeholder:text-[#444] focus:outline-none transition-colors"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Tab-specific toolbar */}
@@ -649,11 +722,13 @@ function QuantitySelector({
 function GenerateButton({
   cost,
   unit,
+  free = false,
   onClick,
   disabled,
 }: {
   cost: number;
   unit: string;
+  free?: boolean;
   onClick: () => void;
   disabled: boolean;
 }) {
@@ -661,12 +736,14 @@ function GenerateButton({
     <button
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-[#8B2020] text-white text-[12px] font-medium hover:bg-[#a03030] disabled:opacity-40 transition-all"
+      className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-[#7B2D26] text-white text-[12px] font-medium hover:bg-[#8f3830] disabled:opacity-40 transition-all shadow-lg"
     >
-      <div className="w-4 h-4 rounded-full bg-amber-500/80 flex items-center justify-center">
-        <CreditCard className="w-2.5 h-2.5 text-white" />
+      <div className="w-4 h-4 rounded-full bg-amber-400 flex items-center justify-center shrink-0">
+        <Coins className="w-2.5 h-2.5 text-amber-900" />
       </div>
-      {cost}
+      <span className="font-semibold">
+        {free ? "Free" : cost}
+      </span>
       <ArrowUp className="w-3.5 h-3.5" />
     </button>
   );

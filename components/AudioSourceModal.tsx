@@ -10,9 +10,11 @@ import {
   Pause,
   Square,
   ChevronDown,
+  ChevronUp,
   Check,
   Search,
 } from "lucide-react";
+import { getVoices, type VoicePreset } from "@/lib/api";
 
 type AudioTab = "tts" | "upload" | "record" | "change-voice";
 
@@ -23,9 +25,50 @@ interface Voice {
   gender: "female" | "male" | "neutral";
   age: "young" | "middle-aged" | "old";
   accent?: string;
+  msVoice?: string;
 }
 
-const MOCK_VOICES: Voice[] = [
+// Map edge-tts voice names to metadata
+function mapEdgeVoice(preset: VoicePreset): Voice {
+  const ms = preset.msVoice || "";
+  let gender: Voice["gender"] = "neutral";
+  let age: Voice["age"] = "middle-aged";
+  let accent = "Standard";
+
+  // Infer gender from MS voice name
+  if (/female/i.test(ms) || /Woman|Girl|Lady/i.test(preset.name)) {
+    gender = "female";
+  } else if (/male/i.test(ms) || /Man|Guy/i.test(preset.name)) {
+    gender = "male";
+  }
+
+  // Infer accent from locale in MS voice name
+  if (/en-US/i.test(ms)) accent = "American";
+  else if (/en-GB/i.test(ms)) accent = "British";
+  else if (/en-AU/i.test(ms)) accent = "Australian";
+  else if (/en-CA/i.test(ms)) accent = "Canadian";
+  else if (/en-IN/i.test(ms)) accent = "Indian";
+  else if (/fr-/i.test(ms)) accent = "French";
+  else if (/de-/i.test(ms)) accent = "German";
+  else if (/es-/i.test(ms)) accent = "Spanish";
+  else if (/it-/i.test(ms)) accent = "Italian";
+  else if (/pt-/i.test(ms)) accent = "Portuguese";
+  else if (/ja-/i.test(ms)) accent = "Japanese";
+  else if (/ko-/i.test(ms)) accent = "Korean";
+  else if (/zh-/i.test(ms)) accent = "Chinese";
+
+  return {
+    id: preset.id,
+    name: preset.name,
+    description: accent + " voice",
+    gender,
+    age,
+    accent,
+    msVoice: ms,
+  };
+}
+
+const FALLBACK_VOICES: Voice[] = [
   { id: "v1", name: "Adam", description: "Dominant, Firm", gender: "male", age: "middle-aged", accent: "American" },
   { id: "v2", name: "Adina", description: "French Young Female", gender: "female", age: "young", accent: "Standard" },
   { id: "v3", name: "Adina", description: "Teen Girl", gender: "female", age: "young", accent: "Canadian" },
@@ -54,12 +97,13 @@ interface AudioSourceModalProps {
 export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModalProps) {
   const [activeTab, setActiveTab] = useState<AudioTab>("tts");
   const [script, setScript] = useState("");
+  const [voices, setVoices] = useState<Voice[]>(FALLBACK_VOICES);
   const [selectedVoice, setSelectedVoice] = useState<Voice | null>(null);
   const [genderFilter, setGenderFilter] = useState<string>("all");
   const [ageFilter, setAgeFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState("");
   const [showGenderDropdown, setShowGenderDropdown] = useState(false);
   const [showAgeDropdown, setShowAgeDropdown] = useState(false);
+  const [showVoiceList, setShowVoiceList] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [recordingTime, setRecordingTime] = useState(0);
@@ -70,17 +114,23 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
   const changeVoiceInputRef = useRef<HTMLInputElement>(null);
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Fetch real voices from API
+  useEffect(() => {
+    getVoices()
+      .then((apiVoices) => {
+        if (apiVoices && apiVoices.length > 0) {
+          setVoices(apiVoices.map(mapEdgeVoice));
+        }
+      })
+      .catch(() => {
+        // Keep fallback voices
+      });
+  }, []);
+
   // Filter voices
-  const filteredVoices = MOCK_VOICES.filter((v) => {
+  const filteredVoices = voices.filter((v) => {
     if (genderFilter !== "all" && v.gender !== genderFilter) return false;
     if (ageFilter !== "all" && v.age !== ageFilter) return false;
-    if (searchQuery) {
-      const q = searchQuery.toLowerCase();
-      return (
-        v.name.toLowerCase().includes(q) ||
-        v.description.toLowerCase().includes(q)
-      );
-    }
     return true;
   });
 
@@ -144,7 +194,7 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
       <div className="absolute inset-0 bg-black/60" onClick={onClose} />
 
       {/* Modal */}
-      <div className="relative z-10 w-full max-w-[620px] max-h-[85vh] bg-[#1e1e22] border border-[#2a2a2a] rounded-2xl shadow-2xl flex flex-col animate-fade-in">
+      <div className="relative z-10 w-full max-w-[620px] max-h-[85vh] bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl shadow-2xl flex flex-col animate-fade-in">
         {/* Header */}
         <div className="px-6 pt-5 pb-0">
           <div className="flex items-center justify-between mb-4">
@@ -158,14 +208,14 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
           </div>
 
           {/* Tabs */}
-          <div className="flex gap-1 bg-[#141416] rounded-xl p-1 mb-4">
+          <div className="flex gap-1 bg-[#111] rounded-xl p-1 mb-4">
             {tabs.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-medium transition-colors flex-1 justify-center ${
                   activeTab === tab.id
-                    ? "bg-[#333] text-white"
+                    ? "bg-[#2a2a2a] text-white border border-[#3a3a3a]"
                     : "text-[#888] hover:text-white"
                 }`}
               >
@@ -192,7 +242,7 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                 <div className="relative flex-1">
                   <button
                     onClick={() => { setShowGenderDropdown(!showGenderDropdown); setShowAgeDropdown(false); }}
-                    className="w-full flex items-center justify-between px-3 py-2.5 bg-[#141416] border border-[#2a2a2a] rounded-lg text-[13px] text-white hover:border-[#444] transition-colors"
+                    className="w-full flex items-center justify-between px-3 py-2.5 bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg text-[13px] text-white hover:border-[#444] transition-colors"
                   >
                     {genderFilter === "all" ? "All genders" : genderFilter.charAt(0).toUpperCase() + genderFilter.slice(1)}
                     <ChevronDown className="w-3.5 h-3.5 text-[#666]" />
@@ -200,7 +250,7 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                   {showGenderDropdown && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setShowGenderDropdown(false)} />
-                      <div className="absolute top-full left-0 mt-1 z-20 w-full bg-[#1e1e22] border border-[#2a2a2a] rounded-lg overflow-hidden shadow-xl">
+                      <div className="absolute top-full left-0 mt-1 z-20 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg overflow-hidden shadow-xl">
                         {["all", "female", "male", "neutral"].map((g) => (
                           <button
                             key={g}
@@ -220,7 +270,7 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                 <div className="relative flex-1">
                   <button
                     onClick={() => { setShowAgeDropdown(!showAgeDropdown); setShowGenderDropdown(false); }}
-                    className="w-full flex items-center justify-between px-3 py-2.5 bg-[#141416] border border-[#2a2a2a] rounded-lg text-[13px] text-white hover:border-[#444] transition-colors"
+                    className="w-full flex items-center justify-between px-3 py-2.5 bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg text-[13px] text-white hover:border-[#444] transition-colors"
                   >
                     {ageFilter === "all" ? "All ages" : ageFilter === "middle-aged" ? "Middle Aged" : ageFilter.charAt(0).toUpperCase() + ageFilter.slice(1)}
                     <ChevronDown className="w-3.5 h-3.5 text-[#666]" />
@@ -228,7 +278,7 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                   {showAgeDropdown && (
                     <>
                       <div className="fixed inset-0 z-10" onClick={() => setShowAgeDropdown(false)} />
-                      <div className="absolute top-full left-0 mt-1 z-20 w-full bg-[#1e1e22] border border-[#2a2a2a] rounded-lg overflow-hidden shadow-xl">
+                      <div className="absolute top-full left-0 mt-1 z-20 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg overflow-hidden shadow-xl">
                         {["all", "young", "middle-aged", "old"].map((a) => (
                           <button
                             key={a}
@@ -245,56 +295,74 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                 </div>
               </div>
 
-              {/* Search */}
-              <div className="relative mb-3">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[#555]" />
-                <input
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search voices..."
-                  className="w-full bg-[#141416] border border-[#2a2a2a] rounded-lg pl-9 pr-3 py-2.5 text-[13px] text-white placeholder:text-[#555] focus:outline-none focus:border-[#444] transition-colors"
-                />
-              </div>
+              {/* Voice selector dropdown */}
+              <div className="relative mb-4">
+                <button
+                  onClick={() => setShowVoiceList(!showVoiceList)}
+                  className="w-full flex items-center justify-between px-3 py-2.5 bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg text-[13px] hover:border-[#444] transition-colors"
+                >
+                  <span className={selectedVoice ? "text-white" : "text-[#555]"}>
+                    {selectedVoice
+                      ? `${selectedVoice.name} - ${selectedVoice.description}`
+                      : "Select a voice..."}
+                  </span>
+                  {showVoiceList ? (
+                    <ChevronUp className="w-3.5 h-3.5 text-[#666]" />
+                  ) : (
+                    <ChevronDown className="w-3.5 h-3.5 text-[#666]" />
+                  )}
+                </button>
 
-              {/* Voice list */}
-              <div className="bg-[#141416] border border-[#2a2a2a] rounded-lg max-h-[200px] overflow-y-auto mb-4">
-                <p className="text-[11px] text-[#666] px-3 pt-2.5 pb-1">
-                  {filteredVoices.length} voices · tap ▷ to preview
-                </p>
-                {filteredVoices.map((voice) => (
-                  <div
-                    key={voice.id}
-                    className={`flex items-center justify-between px-3 py-2.5 hover:bg-[#1e1e22] transition-colors border-t border-[#1e1e22] ${
-                      selectedVoice?.id === voice.id ? "bg-[#1e1e22]" : ""
-                    }`}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-medium text-white">
-                        {voice.name} - {voice.description}
-                      </p>
-                      <p className="text-[11px] text-[#666]">
-                        {voice.gender.charAt(0).toUpperCase() + voice.gender.slice(1)} · {voice.accent || "Standard"} · {voice.age === "middle-aged" ? "Middle Aged" : voice.age.charAt(0).toUpperCase() + voice.age.slice(1)}
-                      </p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0 ml-3">
-                      <button className="flex items-center gap-1 px-2.5 py-1 border border-[#444] rounded-md text-[11px] text-[#ccc] hover:text-white hover:border-[#666] transition-colors">
-                        <Play className="w-3 h-3" />
-                        Preview
-                      </button>
+                {showVoiceList && (
+                  <div className="absolute top-full left-0 mt-1 z-20 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg shadow-xl max-h-[240px] overflow-y-auto">
+                    <p className="text-[11px] text-[#666] px-3 pt-2.5 pb-1 sticky top-0 bg-[#1a1a1a]">
+                      {filteredVoices.length} voices · tap ▷ to preview
+                    </p>
+                    {filteredVoices.map((voice) => (
                       <button
-                        onClick={() => setSelectedVoice(voice)}
-                        className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-colors ${
-                          selectedVoice?.id === voice.id
-                            ? "bg-purple text-white"
-                            : "border border-[#444] text-[#ccc] hover:text-white hover:border-[#666]"
+                        key={voice.id}
+                        onClick={() => {
+                          setSelectedVoice(voice);
+                          setShowVoiceList(false);
+                        }}
+                        className={`w-full flex items-center justify-between px-3 py-2.5 hover:bg-[#222] transition-colors border-t border-[#222] text-left ${
+                          selectedVoice?.id === voice.id ? "bg-[#222]" : ""
                         }`}
                       >
-                        {selectedVoice?.id === voice.id ? "Selected" : "Select"}
+                        <div className="flex-1 min-w-0">
+                          <p className="text-[13px] font-medium text-white">
+                            {voice.name} - {voice.description}
+                          </p>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2a2a2a] text-[#888]">
+                              {voice.gender.charAt(0).toUpperCase() + voice.gender.slice(1)}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2a2a2a] text-[#888]">
+                              {voice.accent || "Standard"}
+                            </span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-[#2a2a2a] text-[#888]">
+                              {voice.age === "middle-aged" ? "Middle Aged" : voice.age.charAt(0).toUpperCase() + voice.age.slice(1)}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 ml-3">
+                          <span
+                            onClick={(e) => { e.stopPropagation(); }}
+                            className="flex items-center gap-1 px-2.5 py-1 border border-[#444] rounded-md text-[11px] text-[#ccc] hover:text-white hover:border-[#666] transition-colors cursor-pointer"
+                          >
+                            <Play className="w-3 h-3" />
+                            Preview
+                          </span>
+                        </div>
                       </button>
-                    </div>
+                    ))}
+                    {filteredVoices.length > 8 && (
+                      <div className="flex justify-center py-2 text-[#555]">
+                        <ChevronDown className="w-4 h-4" />
+                      </div>
+                    )}
                   </div>
-                ))}
+                )}
               </div>
 
               {/* Script */}
@@ -304,7 +372,7 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                 onChange={(e) => setScript(e.target.value)}
                 placeholder="Write what your avatar should say..."
                 rows={4}
-                className="w-full bg-[#141416] border border-[#2a2a2a] focus:border-[#4a90d9] rounded-lg px-3 py-2.5 text-[13px] text-white placeholder:text-[#555] focus:outline-none resize-none transition-colors mb-3"
+                className="w-full bg-[#0f0f0f] border border-[#2a2a2a] focus:border-[#4a90d9] rounded-lg px-3 py-2.5 text-[13px] text-white placeholder:text-[#555] focus:outline-none resize-none transition-colors mb-3"
               />
 
               {/* Preview controls */}
@@ -320,6 +388,21 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                   <span className="text-[12px] text-[#666]">0:00 / 0:00</span>
                 </div>
               )}
+
+              {/* Generate Preview button */}
+              <div className="flex items-center">
+                <button
+                  disabled={!selectedVoice || !script.trim()}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[12px] transition-colors ${
+                    selectedVoice && script.trim()
+                      ? "border-[#444] text-[#ccc] hover:text-white hover:border-[#666]"
+                      : "border-[#2a2a2a] text-[#444] cursor-not-allowed"
+                  }`}
+                >
+                  <Play className="w-3 h-3" />
+                  Generate Preview
+                </button>
+              </div>
             </div>
           )}
 
@@ -356,7 +439,9 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                   </>
                 ) : (
                   <>
-                    <p className="text-[14px] text-white font-medium mb-1">Upload an audio file</p>
+                    <p className="text-[14px] text-white font-medium mb-1">
+                      Drag & drop an audio file here, or click to upload
+                    </p>
                     <p className="text-[12px] text-[#666]">
                       WAV, MP3, M4A, WebM, OGG (max 12MB, 60s)
                     </p>
@@ -372,18 +457,18 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
           {/* Record Tab */}
           {activeTab === "record" && (
             <div className="py-8 flex flex-col items-center">
-              <div className="mb-6">
+              <div className="mb-6 w-full">
                 <p className="text-[13px] text-[#888] text-center mb-6">
                   Record your audio directly in the browser.
                 </p>
                 {/* Waveform placeholder */}
-                <div className="w-full h-16 bg-[#141416] rounded-lg border border-[#2a2a2a] flex items-center justify-center mb-4 px-4">
+                <div className="w-full h-16 bg-[#0f0f0f] rounded-lg border border-[#2a2a2a] flex items-center justify-center mb-4 px-4">
                   {isRecording ? (
                     <div className="flex items-center gap-1">
                       {[...Array(24)].map((_, i) => (
                         <div
                           key={i}
-                          className="w-1 bg-purple rounded-full animate-pulse"
+                          className="w-1 bg-red-500 rounded-full animate-pulse"
                           style={{
                             height: `${Math.random() * 40 + 8}px`,
                             animationDelay: `${i * 0.05}s`,
@@ -407,14 +492,14 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                 onClick={handleRecordToggle}
                 className={`w-16 h-16 rounded-full flex items-center justify-center transition-all ${
                   isRecording
-                    ? "bg-red-500 hover:bg-red-600"
-                    : "bg-purple hover:bg-purple-hover"
+                    ? "bg-red-500 hover:bg-red-600 animate-pulse"
+                    : "bg-red-500/80 hover:bg-red-500"
                 }`}
               >
                 {isRecording ? (
                   <Square className="w-6 h-6 text-white" />
                 ) : (
-                  <Mic className="w-6 h-6 text-white" />
+                  <div className="w-6 h-6 rounded-full bg-white" />
                 )}
               </button>
               <p className="text-[12px] text-[#666] mt-3">
@@ -444,25 +529,31 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
               />
               <div
                 onClick={() => changeVoiceInputRef.current?.click()}
+                onDragOver={(e) => { e.preventDefault(); }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const file = e.dataTransfer.files[0];
+                  if (file) setChangeVoiceFile(file);
+                }}
                 className="border border-dashed border-[#333] rounded-lg p-6 flex flex-col items-center cursor-pointer hover:border-[#555] transition-colors mb-5"
               >
                 <Upload className="w-6 h-6 text-[#555] mb-2" />
                 {changeVoiceFile ? (
                   <p className="text-[13px] text-white">{changeVoiceFile.name}</p>
                 ) : (
-                  <p className="text-[12px] text-[#666]">Upload source audio (WAV, MP3, M4A)</p>
+                  <p className="text-[12px] text-[#666]">Drag & drop source audio (WAV, MP3, M4A)</p>
                 )}
               </div>
 
               {/* Target voice */}
               <label className="text-[13px] text-white font-medium mb-2 block">Target Voice</label>
-              <div className="bg-[#141416] border border-[#2a2a2a] rounded-lg max-h-[180px] overflow-y-auto">
-                {MOCK_VOICES.slice(0, 6).map((voice) => (
+              <div className="bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg max-h-[180px] overflow-y-auto">
+                {voices.slice(0, 8).map((voice) => (
                   <button
                     key={voice.id}
                     onClick={() => setChangeVoiceTarget(voice)}
-                    className={`w-full flex items-center justify-between px-3 py-2.5 hover:bg-[#1e1e22] transition-colors border-b border-[#1e1e22] text-left ${
-                      changeVoiceTarget?.id === voice.id ? "bg-[#1e1e22]" : ""
+                    className={`w-full flex items-center justify-between px-3 py-2.5 hover:bg-[#1a1a1a] transition-colors border-b border-[#1a1a1a] text-left ${
+                      changeVoiceTarget?.id === voice.id ? "bg-[#1a1a1a]" : ""
                     }`}
                   >
                     <div>
@@ -475,12 +566,35 @@ export default function AudioSourceModal({ onClose, onConfirm }: AudioSourceModa
                   </button>
                 ))}
               </div>
+
+              {/* Convert button */}
+              {changeVoiceFile && changeVoiceTarget && (
+                <div className="mt-4">
+                  <button className="px-4 py-2 bg-purple text-white text-[13px] font-medium rounded-lg hover:bg-purple-hover transition-colors">
+                    Convert
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-[#2a2a2a] flex justify-end">
+        <div className="px-6 py-4 border-t border-[#2a2a2a] flex items-center justify-between">
+          {activeTab === "tts" && (
+            <button
+              disabled={!selectedVoice || !script.trim()}
+              className={`flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-[12px] transition-colors ${
+                selectedVoice && script.trim()
+                  ? "border-[#444] text-[#ccc] hover:text-white hover:border-[#666]"
+                  : "border-[#2a2a2a] text-[#444] cursor-not-allowed"
+              }`}
+            >
+              <Play className="w-3 h-3" />
+              Generate Preview
+            </button>
+          )}
+          {activeTab !== "tts" && <div />}
           <button
             onClick={handleConfirm}
             className="px-5 py-2.5 bg-white text-black text-[13px] font-medium rounded-lg hover:bg-gray-100 transition-colors"

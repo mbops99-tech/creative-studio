@@ -1,6 +1,6 @@
 "use client";
 
-import { Settings, CreditCard, LayoutGrid } from "lucide-react";
+import { Settings, Coins, LayoutGrid, Clock } from "lucide-react";
 
 interface TopBarProps {
   credits: number;
@@ -13,11 +13,18 @@ export default function TopBar({ credits, onBuyCredits, onLibrary, onSettings }:
   return (
     <div className="h-12 border-b border-[#2a2a2a] flex items-center justify-between px-5 shrink-0">
       {/* Left: trial indicator */}
-      <div className="flex items-center gap-2">
-        <div className="w-2 h-2 rounded-full bg-green-500" />
-        <span className="text-[12px] font-medium text-white">TRIAL</span>
-        <span className="text-[12px] text-[#555]">•</span>
-        <span className="text-[12px] text-[#888]">22h left</span>
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-1.5">
+          <div className="w-2 h-2 rounded-full bg-green-500" />
+          <span className="text-[12px] font-semibold text-white tracking-wide">TRIAL</span>
+        </div>
+        <div className="flex items-center gap-1 text-[12px] text-[#888]">
+          <Clock className="w-3 h-3" />
+          22h left
+        </div>
+        <button className="px-3 py-1 rounded-full bg-[#D03030] text-white text-[11px] font-medium hover:bg-[#e03535] transition-colors">
+          Subscribe now
+        </button>
       </div>
 
       {/* Right: actions */}
@@ -30,14 +37,14 @@ export default function TopBar({ credits, onBuyCredits, onLibrary, onSettings }:
           Library
         </button>
         <div className="flex items-center gap-1.5 text-[12px] text-white">
-          <div className="w-4 h-4 rounded-full bg-amber-500/80 flex items-center justify-center">
-            <CreditCard className="w-2.5 h-2.5 text-white" />
+          <div className="w-4 h-4 rounded-full bg-amber-400 flex items-center justify-center">
+            <Coins className="w-2.5 h-2.5 text-amber-900" />
           </div>
           {credits} credits
         </div>
         <button
           onClick={onBuyCredits}
-          className="px-3 py-1.5 rounded-lg border border-[#2a2a2a] text-[12px] text-white hover:bg-[#1a1a1a] transition-colors"
+          className="px-3 py-1.5 rounded-full border border-[#333] text-[12px] text-white hover:bg-[#1a1a1a] transition-colors"
         >
           Buy credits
         </button>

@@ -1,6 +1,6 @@
 "use client";
 
-import { CreditCard, ChevronDown } from "lucide-react";
+import { Coins, ChevronDown } from "lucide-react";
 import { useState } from "react";
 import type { ModeTab } from "./ModeTabs";
 
@@ -53,7 +53,7 @@ export default function SettingsPopup({
       <div className="fixed inset-0 z-40" onClick={onClose} />
 
       {/* Popup */}
-      <div className="absolute bottom-full left-0 mb-2 z-50 w-[260px] bg-[#1e1e22] border border-[#2a2a2a] rounded-xl p-4 shadow-2xl animate-fade-in">
+      <div className="absolute bottom-full left-0 mb-2 z-50 w-[270px] bg-[#1a1a1a] border border-[#2a2a2a] rounded-2xl p-4 shadow-2xl animate-fade-in">
         <h4 className="text-[14px] font-semibold text-white mb-4">{title}</h4>
 
         {isImageTab ? (
@@ -66,7 +66,7 @@ export default function SettingsPopup({
               <div className="relative">
                 <button
                   onClick={() => setShowAspectDropdown(!showAspectDropdown)}
-                  className="w-full flex items-center justify-between px-3 py-2 bg-[#141416] border border-[#2a2a2a] rounded-lg text-[13px] text-white hover:border-[#444] transition-colors"
+                  className="w-full flex items-center justify-between px-3 py-2 bg-[#0f0f0f] border border-[#2a2a2a] rounded-lg text-[13px] text-white hover:border-[#444] transition-colors"
                 >
                   {aspectRatio}
                   <ChevronDown className="w-3.5 h-3.5 text-[#666]" />
@@ -74,7 +74,7 @@ export default function SettingsPopup({
                 {showAspectDropdown && (
                   <>
                     <div className="fixed inset-0 z-10" onClick={() => setShowAspectDropdown(false)} />
-                    <div className="absolute top-full left-0 mt-1 z-20 w-full bg-[#1e1e22] border border-[#2a2a2a] rounded-lg overflow-hidden shadow-xl">
+                    <div className="absolute top-full left-0 mt-1 z-20 w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg overflow-hidden shadow-xl">
                       {["9:16", "1:1", "4:5", "16:9"].map((ratio) => (
                         <button
                           key={ratio}
@@ -105,10 +105,10 @@ export default function SettingsPopup({
                   <button
                     key={res}
                     onClick={() => onResolutionChange?.(res)}
-                    className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                    className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
                       resolution === res
-                        ? "bg-[#333] text-white"
-                        : "bg-[#1a1a1a] text-[#666] hover:text-[#888]"
+                        ? "bg-[#2a2a2a] text-white border-[#444]"
+                        : "bg-transparent text-[#666] border-[#333] hover:text-[#888] hover:border-[#444]"
                     }`}
                   >
                     {res}
@@ -149,20 +149,20 @@ export default function SettingsPopup({
               <div className="flex gap-2">
                 <button
                   onClick={() => onOrientationChange("portrait")}
-                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
                     orientation === "portrait"
-                      ? "bg-[#333] text-white"
-                      : "bg-[#1a1a1a] text-[#666] hover:text-[#888]"
+                      ? "bg-[#2a2a2a] text-white border-[#444]"
+                      : "bg-transparent text-[#666] border-[#333] hover:text-[#888]"
                   }`}
                 >
                   Portrait
                 </button>
                 <button
                   onClick={() => onOrientationChange("landscape")}
-                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
                     orientation === "landscape"
-                      ? "bg-[#333] text-white"
-                      : "bg-[#1a1a1a] text-[#666] hover:text-[#888]"
+                      ? "bg-[#2a2a2a] text-white border-[#444]"
+                      : "bg-transparent text-[#666] border-[#333] hover:text-[#888]"
                   }`}
                 >
                   Landscape
@@ -178,20 +178,20 @@ export default function SettingsPopup({
               <div className="flex gap-2">
                 <button
                   onClick={() => onDurationChange("10s")}
-                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
                     duration === "10s"
-                      ? "bg-[#333] text-white"
-                      : "bg-[#1a1a1a] text-[#666] hover:text-[#888]"
+                      ? "bg-[#2a2a2a] text-white border-[#444]"
+                      : "bg-transparent text-[#666] border-[#333] hover:text-[#888]"
                   }`}
                 >
                   10s
                 </button>
                 <button
                   onClick={() => onDurationChange("15s")}
-                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
                     duration === "15s"
-                      ? "bg-[#333] text-white"
-                      : "bg-[#1a1a1a] text-[#666] hover:text-[#888]"
+                      ? "bg-[#2a2a2a] text-white border-[#444]"
+                      : "bg-transparent text-[#666] border-[#333] hover:text-[#888]"
                   }`}
                 >
                   15s
@@ -207,20 +207,20 @@ export default function SettingsPopup({
               <div className="flex gap-2">
                 <button
                   onClick={() => onQualityChange("standard")}
-                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
                     quality === "standard"
-                      ? "bg-[#333] text-white"
-                      : "bg-[#1a1a1a] text-[#666] hover:text-[#888]"
+                      ? "bg-[#2a2a2a] text-white border-[#444]"
+                      : "bg-transparent text-[#666] border-[#333] hover:text-[#888]"
                   }`}
                 >
                   Standard
                 </button>
                 <button
                   onClick={() => onQualityChange("high")}
-                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium transition-colors ${
+                  className={`flex-1 py-1.5 rounded-lg text-[12px] font-medium border transition-colors ${
                     quality === "high"
-                      ? "bg-[#333] text-white"
-                      : "bg-[#1a1a1a] text-[#666] hover:text-[#888]"
+                      ? "bg-[#2a2a2a] text-white border-[#444]"
+                      : "bg-transparent text-[#666] border-[#333] hover:text-[#888]"
                   }`}
                 >
                   High
@@ -231,12 +231,12 @@ export default function SettingsPopup({
         )}
 
         {/* Cost */}
-        <div className="pt-1 border-t border-[#2a2a2a]">
-          <div className="flex items-center justify-between mt-2">
+        <div className="pt-2 border-t border-[#2a2a2a]">
+          <div className="flex items-center justify-between mt-1">
             <span className="text-[12px] text-[#888]">Cost</span>
             <div className="flex items-center gap-1.5">
-              <div className="w-4 h-4 rounded-full bg-amber-500/80 flex items-center justify-center">
-                <CreditCard className="w-2.5 h-2.5 text-white" />
+              <div className="w-4 h-4 rounded-full bg-amber-400 flex items-center justify-center">
+                <Coins className="w-2.5 h-2.5 text-amber-900" />
               </div>
               <span className="text-[13px] text-white font-medium">
                 {cost}/{isImageTab ? "img" : "vid"}
