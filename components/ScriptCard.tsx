@@ -14,9 +14,10 @@ import {
 
 interface ScriptCardProps {
   data: ScriptData;
+  onGenerateImage?: (shotName: string, action: string) => void;
 }
 
-export default function ScriptCard({ data }: ScriptCardProps) {
+export default function ScriptCard({ data, onGenerateImage }: ScriptCardProps) {
   const [expanded, setExpanded] = useState(true);
 
   return (
@@ -142,7 +143,10 @@ export default function ScriptCard({ data }: ScriptCardProps) {
                         <td className="px-3 py-2.5 text-muted">{shot.cost}</td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center justify-end gap-1.5">
-                            <button className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/5 hover:bg-purple/20 text-muted hover:text-purple transition-all text-[11px]">
+                            <button
+                              onClick={() => onGenerateImage?.(shot.name, shot.action)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-white/5 hover:bg-purple/20 text-muted hover:text-purple transition-all text-[11px]"
+                            >
                               <Image className="w-3 h-3" />
                               Image
                             </button>

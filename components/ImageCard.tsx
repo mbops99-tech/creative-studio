@@ -8,21 +8,38 @@ import {
   RefreshCw,
   Pencil,
   ArrowRight,
+  Loader2,
 } from "lucide-react";
 
 interface ImageCardProps {
   shotName: string;
   variations: ImageVariation[];
+  onEdit?: (imageUrl: string, prompt: string) => void;
+  onRegenerate?: () => void;
 }
 
-export default function ImageCard({ shotName, variations }: ImageCardProps) {
+export default function ImageCard({ shotName, variations, onEdit, onRegenerate }: ImageCardProps) {
   const [selected, setSelected] = useState<string | null>(
     variations.find((v) => v.selected)?.id || null
   );
   const [showEdit, setShowEdit] = useState(false);
+  const [editPrompt, setEditPrompt] = useState("");
+  const [isEditing, setIsEditing] = useState(false);
+
+  const handleApplyEdit = () => {
+    if (!editPrompt.trim() || !selected) return;
+    const selectedVar = variations.find((v) => v.id === selected);
+    if (selectedVar && onEdit) {
+      setIsEditing(true);
+      onEdit(selectedVar.url, editPrompt);
+      setEditPrompt("");
+      setShowEdit(false);
+      setIsEditing(false);
+    }
+  };
 
   return (
-    <div className="bg-card border border-card-border rounded-xl overflow-hidden">
+    <div className="bg-[#141420] border border-[#1e1e3a] rounded-xl overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-3 px-5 py-3.5">
         <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center">
@@ -32,8 +49,8 @@ export default function ImageCard({ shotName, variations }: ImageCardProps) {
           <h3 className="text-sm font-semibold text-white">
             First Frame — {shotName}
           </h3>
-          <p className="text-[11px] text-muted">
-            4 variations generated • Click to select
+          <p className="text-[11px] text-[#888]">
+            {variations.length} variations generated • Click to select
           </p>
         </div>
       </div>
@@ -47,7 +64,7 @@ export default function ImageCard({ shotName, variations }: ImageCardProps) {
               onClick={() => setSelected(v.id)}
               className={`relative aspect-[2/3] rounded-lg overflow-hidden border-2 transition-all hover:scale-[1.02] ${
                 selected === v.id
-                  ? "border-purple shadow-lg shadow-purple/20"
+                  ? "border-[#6C5CE7] shadow-lg shadow-[#6C5CE7]/20"
                   : "border-transparent hover:border-white/20"
               }`}
             >
@@ -65,8 +82,8 @@ export default function ImageCard({ shotName, variations }: ImageCardProps) {
               </div>
               {/* Selected check */}
               {selected === v.id && (
-                <div className="absolute inset-0 bg-purple/20 flex items-center justify-center">
-                  <div className="w-8 h-8 rounded-full bg-purple flex items-center justify-center">
+                <div className="absolute inset-0 bg-[#6C5CE7]/20 flex items-center justify-center">
+                  <div className="w-8 h-8 rounded-full bg-[#6C5CE7] flex items-center justify-center">
                     <Check className="w-4 h-4 text-white" />
                   </div>
                 </div>
@@ -78,34 +95,50 @@ export default function ImageCard({ shotName, variations }: ImageCardProps) {
 
       {/* Actions */}
       {selected && (
-        <div className="px-5 py-3 border-t border-card-border">
+        <div className="px-5 py-3 border-t border-[#1e1e3a]">
           <div className="flex items-center gap-2">
-            <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple text-white text-[12px] font-medium hover:bg-purple-hover transition-colors">
+            <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#6C5CE7] text-white text-[12px] font-medium hover:bg-[#5A4BD1] transition-colors">
               <ArrowRight className="w-3.5 h-3.5" />
               Use This
             </button>
             <button
               onClick={() => setShowEdit(!showEdit)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-muted text-[12px] font-medium hover:bg-white/10 hover:text-white transition-colors"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-[#888] text-[12px] font-medium hover:bg-white/10 hover:text-white transition-colors"
             >
               <Pencil className="w-3.5 h-3.5" />
-              Edit
+              Magic Edit
             </button>
-            <button className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-muted text-[12px] font-medium hover:bg-white/10 hover:text-white transition-colors">
-              <RefreshCw className="w-3.5 h-3.5" />
-              Regenerate
-            </button>
+            {onRegenerate && (
+              <button
+                onClick={onRegenerate}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/5 text-[#888] text-[12px] font-medium hover:bg-white/10 hover:text-white transition-colors"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                Regenerate
+              </button>
+            )}
           </div>
 
           {showEdit && (
             <div className="mt-3 flex gap-2">
               <input
                 type="text"
-                placeholder="Describe changes..."
-                className="flex-1 bg-white/5 border border-card-border rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-muted/60 focus:outline-none focus:border-purple/50 transition-colors"
+                value={editPrompt}
+                onChange={(e) => setEditPrompt(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleApplyEdit()}
+                placeholder="Describe changes (e.g. 'make her look more natural, messy hair')..."
+                className="flex-1 bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:outline-none focus:border-[#6C5CE7]/50 transition-colors"
               />
-              <button className="px-3 py-2 rounded-lg bg-purple text-white text-[12px] font-medium hover:bg-purple-hover transition-colors">
-                Apply
+              <button
+                onClick={handleApplyEdit}
+                disabled={!editPrompt.trim() || isEditing}
+                className="px-3 py-2 rounded-lg bg-[#6C5CE7] text-white text-[12px] font-medium hover:bg-[#5A4BD1] disabled:opacity-50 transition-colors"
+              >
+                {isEditing ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  "Apply"
+                )}
               </button>
             </div>
           )}

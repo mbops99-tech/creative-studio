@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Sidebar from "@/components/Sidebar";
 import ScriptCard from "@/components/ScriptCard";
 import ImageCard from "@/components/ImageCard";
 import VideoCard from "@/components/VideoCard";
-import { generateScript } from "@/lib/api";
+import { generateScript, generateImages, checkImageStatus, editImage, getActors } from "@/lib/api";
+import type { Actor } from "@/lib/api";
 import type { Message } from "@/lib/mock-data";
 import { Send, FileText, Image, Video, Mic, Paperclip, Sparkles, Loader2 } from "lucide-react";
 
@@ -27,21 +28,172 @@ export default function Home() {
     speed: "fast",
   });
 
+  // Image form state
+  const [imagePrompt, setImagePrompt] = useState("");
+  const [selectedActor, setSelectedActor] = useState<string | null>(null);
+  const [actors, setActors] = useState<Actor[]>([]);
+  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+
+  // Load actors on mount
+  useEffect(() => {
+    getActors().then(setActors).catch(console.error);
+  }, []);
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  // Poll for image generation status
+  const pollImageStatus = useCallback(async (jobId: string, loadingMsgId: string, shotName: string) => {
+    const poll = async () => {
+      try {
+        const status = await checkImageStatus(jobId);
+
+        if (status.status === "processing") {
+          // Update progress in loading message
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === loadingMsgId
+                ? { ...m, content: "image-loading", data: { progress: status.progress, shotName } }
+                : m
+            )
+          );
+          setTimeout(poll, 2000);
+        } else if (status.status === "complete") {
+          // Replace loading with ImageCard
+          const variations = status.images.map((img, i) => ({
+            id: img.id,
+            url: img.url,
+            selected: false,
+          }));
+
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === loadingMsgId
+                ? {
+                    ...m,
+                    content: "image",
+                    data: { shotName, variations },
+                  }
+                : m
+            )
+          );
+          setIsGeneratingImage(false);
+        } else if (status.status === "failed") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === loadingMsgId
+                ? {
+                    ...m,
+                    content: `Image generation failed: ${status.error || "Unknown error"}`,
+                    data: undefined,
+                  }
+                : m
+            )
+          );
+          setIsGeneratingImage(false);
+        } else {
+          // pending
+          setTimeout(poll, 2000);
+        }
+      } catch (err) {
+        console.error("Poll error:", err);
+        setTimeout(poll, 3000);
+      }
+    };
+
+    setTimeout(poll, 2000);
+  }, []);
+
+  const handleGenerateImage = async (prompt: string, shotName: string = "Custom") => {
+    if (!prompt.trim()) return;
+
+    const userMsg: Message = {
+      id: String(Date.now()),
+      role: "user",
+      content: `Generate first frame image: "${prompt}"`,
+    };
+
+    const loadingMsgId = String(Date.now() + 1);
+    const loadingMsg: Message = {
+      id: loadingMsgId,
+      role: "assistant",
+      content: "image-loading",
+      data: { progress: 0, shotName },
+    };
+
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setActiveQuickAction(null);
+    setIsGeneratingImage(true);
+    setImagePrompt("");
+
+    try {
+      const jobId = await generateImages(prompt, undefined, selectedActor || undefined, 4);
+      pollImageStatus(jobId, loadingMsgId, shotName);
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === loadingMsgId
+            ? {
+                ...m,
+                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
+                data: undefined,
+              }
+            : m
+        )
+      );
+      setIsGeneratingImage(false);
+    }
+  };
+
+  const handleImageEdit = async (imageUrl: string, prompt: string) => {
+    const loadingMsgId = String(Date.now());
+    const loadingMsg: Message = {
+      id: loadingMsgId,
+      role: "assistant",
+      content: "image-loading",
+      data: { progress: 0, shotName: "Magic Edit" },
+    };
+
+    setMessages((prev) => [...prev, loadingMsg]);
+    setIsGeneratingImage(true);
+
+    try {
+      const jobId = await editImage(imageUrl, prompt);
+      pollImageStatus(jobId, loadingMsgId, "Magic Edit");
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === loadingMsgId
+            ? {
+                ...m,
+                content: `Edit error: ${err instanceof Error ? err.message : "Unknown error"}`,
+                data: undefined,
+              }
+            : m
+        )
+      );
+      setIsGeneratingImage(false);
+    }
+  };
+
+  // Called from ScriptCard shotlist "Image" button
+  const handleShotImageGenerate = (shotName: string, action: string) => {
+    setImagePrompt(action);
+    setActiveQuickAction("image");
+    // Auto-generate with the action as prompt
+    handleGenerateImage(action, shotName);
+  };
+
   const handleGenerateScript = async () => {
     if (!scriptForm.product.trim() || !scriptForm.audience.trim()) return;
 
-    // Add user message
     const userMsg: Message = {
       id: String(Date.now()),
       role: "user",
       content: `Generate a UGC ad script for ${scriptForm.product} targeting ${scriptForm.audience}`,
     };
 
-    // Add loading message
     const loadingMsg: Message = {
       id: String(Date.now() + 1),
       role: "assistant",
@@ -55,7 +207,6 @@ export default function Home() {
     try {
       const scriptData = await generateScript(scriptForm);
 
-      // Replace loading message with script card
       setMessages((prev) => {
         const withoutLoading = prev.filter((m) => m.id !== loadingMsg.id);
         return [
@@ -69,7 +220,6 @@ export default function Home() {
         ];
       });
 
-      // Reset form
       setScriptForm({
         product: "",
         audience: "",
@@ -79,7 +229,6 @@ export default function Home() {
         speed: "fast",
       });
     } catch (err) {
-      // Replace loading with error
       setMessages((prev) => {
         const withoutLoading = prev.filter((m) => m.id !== loadingMsg.id);
         return [
@@ -108,14 +257,12 @@ export default function Home() {
     setInput("");
     setActiveQuickAction(null);
 
-    // Detect if it looks like a script request
     const scriptKeywords = ["script", "ad", "ugc", "create", "generate", "write"];
     const isScriptRequest = scriptKeywords.some((kw) =>
       userInput.toLowerCase().includes(kw)
     );
 
     if (isScriptRequest && messages.length === 0) {
-      // First message that looks like a script request — suggest using the panel
       setMessages((prev) => [
         ...prev,
         {
@@ -127,7 +274,6 @@ export default function Home() {
       ]);
       setActiveQuickAction("script");
     } else {
-      // Regular message — echo for now (AI chat integration can come later)
       setMessages((prev) => [
         ...prev,
         {
@@ -197,11 +343,33 @@ export default function Home() {
                         <p className="text-[13px] text-white/60">Generating script...</p>
                       </div>
                     )}
+                    {msg.content === "image-loading" && msg.data && (
+                      <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+                          <p className="text-[13px] text-white/60">
+                            Generating images for {msg.data.shotName}...
+                          </p>
+                        </div>
+                        {msg.data.progress > 0 && (
+                          <div className="w-full bg-white/10 rounded-full h-1.5">
+                            <div
+                              className="bg-emerald-400 h-1.5 rounded-full transition-all duration-500"
+                              style={{ width: `${msg.data.progress}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
                     {msg.content === "script" && msg.data && (
-                      <ScriptCard data={msg.data} />
+                      <ScriptCard data={msg.data} onGenerateImage={handleShotImageGenerate} />
                     )}
                     {msg.content === "image" && msg.data && (
-                      <ImageCard shotName={msg.data.shotName} variations={msg.data.variations} />
+                      <ImageCard
+                        shotName={msg.data.shotName}
+                        variations={msg.data.variations}
+                        onEdit={handleImageEdit}
+                      />
                     )}
                     {msg.content === "video" && msg.data && (
                       <VideoCard data={msg.data} />
@@ -209,7 +377,8 @@ export default function Home() {
                     {msg.content !== "script" &&
                       msg.content !== "image" &&
                       msg.content !== "video" &&
-                      msg.content !== "loading" && (
+                      msg.content !== "loading" &&
+                      msg.content !== "image-loading" && (
                         <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3">
                           <p className="text-[13px] text-white/80">{msg.content}</p>
                         </div>
@@ -289,21 +458,55 @@ export default function Home() {
                 <div className="space-y-3">
                   <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Image</p>
                   <div className="flex gap-2">
-                    {["Sarah", "Mike", "Aisha", "James", "Yuki", "Nina"].map((name) => (
-                      <div key={name} className="flex flex-col items-center gap-1 cursor-pointer group">
-                        <div className="w-10 h-10 rounded-full bg-white/10 group-hover:ring-2 ring-[#6C5CE7] transition-all flex items-center justify-center text-[10px] text-[#888]">
-                          {name[0]}
-                        </div>
-                        <span className="text-[10px] text-[#888]">{name}</span>
-                      </div>
-                    ))}
+                    {actors.length > 0
+                      ? actors.map((actor) => (
+                          <div
+                            key={actor.id}
+                            onClick={() => setSelectedActor(selectedActor === actor.id ? null : actor.id)}
+                            className="flex flex-col items-center gap-1 cursor-pointer group"
+                          >
+                            <div
+                              className={`w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-[10px] text-[#888] transition-all ${
+                                selectedActor === actor.id
+                                  ? "ring-2 ring-[#6C5CE7] bg-[#6C5CE7]/20"
+                                  : "group-hover:ring-2 ring-[#6C5CE7]"
+                              }`}
+                            >
+                              {actor.name[0]}
+                            </div>
+                            <span className={`text-[10px] ${selectedActor === actor.id ? "text-[#6C5CE7]" : "text-[#888]"}`}>
+                              {actor.name}
+                            </span>
+                          </div>
+                        ))
+                      : ["Sarah", "Mike", "Aisha", "James", "Yuki", "Nina"].map((name) => (
+                          <div key={name} className="flex flex-col items-center gap-1 cursor-pointer group">
+                            <div className="w-10 h-10 rounded-full bg-white/10 group-hover:ring-2 ring-[#6C5CE7] transition-all flex items-center justify-center text-[10px] text-[#888]">
+                              {name[0]}
+                            </div>
+                            <span className="text-[10px] text-[#888]">{name}</span>
+                          </div>
+                        ))}
                   </div>
                   <textarea
                     className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-16"
                     placeholder="Describe the image..."
+                    value={imagePrompt}
+                    onChange={(e) => setImagePrompt(e.target.value)}
                   />
-                  <button className="bg-[#6C5CE7] hover:bg-[#5A4BD1] text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors">
-                    Generate 4 Variations ~$0.20
+                  <button
+                    onClick={() => handleGenerateImage(imagePrompt)}
+                    disabled={isGeneratingImage || !imagePrompt.trim()}
+                    className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+                  >
+                    {isGeneratingImage ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      "Generate 4 Variations ~$0.20"
+                    )}
                   </button>
                 </div>
               )}

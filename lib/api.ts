@@ -1,4 +1,4 @@
-import type { ScriptData, Shot } from "./mock-data";
+import type { ScriptData, Shot, ImageVariation } from "./mock-data";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL || "http://151.247.196.131:5010";
@@ -14,6 +14,19 @@ async function apiFetch(path: string, body: Record<string, unknown>) {
       "X-API-Key": API_KEY,
     },
     body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API error ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+async function apiGet(path: string) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: {
+      "X-API-Key": API_KEY,
+    },
   });
   if (!res.ok) {
     const text = await res.text();
@@ -128,4 +141,68 @@ export async function generateInspired(params: {
     shots,
     totalCost,
   };
+}
+
+// --- Image Generation API ---
+
+export interface Actor {
+  id: string;
+  name: string;
+  imageUrl: string;
+  description: string;
+}
+
+export interface ImageJobStatus {
+  status: "pending" | "processing" | "complete" | "failed";
+  images: { id: string; url: string; filename: string }[];
+  progress: number;
+  error?: string;
+}
+
+export async function generateImages(
+  prompt: string,
+  negativePrompt?: string,
+  actorId?: string,
+  count?: number
+): Promise<string> {
+  const data = await apiFetch("/api/image/generate", {
+    prompt,
+    negativePrompt,
+    actorId,
+    count: count || 4,
+  });
+  return data.jobId;
+}
+
+export async function checkImageStatus(jobId: string): Promise<ImageJobStatus> {
+  const data = await apiGet(`/api/image/status/${jobId}`);
+  // Convert relative URLs to absolute
+  if (data.images) {
+    data.images = data.images.map((img: { id: string; url: string; filename: string }) => ({
+      ...img,
+      url: img.url.startsWith("http") ? img.url : `${API_BASE}${img.url}`,
+    }));
+  }
+  return data;
+}
+
+export async function editImage(
+  imageUrl: string,
+  prompt: string,
+  negativePrompt?: string
+): Promise<string> {
+  const data = await apiFetch("/api/image/edit", {
+    imageUrl,
+    prompt,
+    negativePrompt,
+  });
+  return data.jobId;
+}
+
+export async function getActors(): Promise<Actor[]> {
+  const data = await apiGet("/api/actors");
+  return data.actors.map((a: Actor) => ({
+    ...a,
+    imageUrl: a.imageUrl.startsWith("http") ? a.imageUrl : `${API_BASE}${a.imageUrl}`,
+  }));
 }
