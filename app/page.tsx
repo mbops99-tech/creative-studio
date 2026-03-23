@@ -1,1430 +1,736 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Sidebar from "@/components/Sidebar";
+import TopBar from "@/components/TopBar";
+import ModeTabs, { type ModeTab } from "@/components/ModeTabs";
+import PromptBar, { type PromptSettings } from "@/components/PromptBar";
+import ActorGallery from "@/components/ActorGallery";
+import CreateActorModal from "@/components/CreateActorModal";
 import ScriptCard from "@/components/ScriptCard";
 import ImageCard from "@/components/ImageCard";
 import VideoCard from "@/components/VideoCard";
-import TimelineEditor from "@/components/TimelineEditor";
-import ExportPanel from "@/components/ExportPanel";
-import { generateScript, generateImages, checkImageStatus, editImage, getActors, generateVideo, checkVideoStatus, generateVoice, getVoices, generateBroll, checkBrollStatus, unifyVoice, checkUnifyStatus } from "@/lib/api";
-import type { Actor, VoicePreset, CompileClip } from "@/lib/api";
-import type { Message } from "@/lib/mock-data";
-import { Send, FileText, Image, Video, Mic, Paperclip, Sparkles, Loader2, Play, Combine, Scissors } from "lucide-react";
+import ResultCard from "@/components/ResultCard";
+import {
+  generateScript,
+  generateImages,
+  checkImageStatus,
+  generateVideo,
+  checkVideoStatus,
+  getActors,
+  generateBroll,
+  checkBrollStatus,
+  type Actor,
+  type ImageJobStatus,
+  type VideoJobStatus,
+  type BrollJobStatus,
+} from "@/lib/api";
+import type { ScriptData, ImageVariation, VideoData } from "@/lib/mock-data";
+import { MOCK_PROJECTS } from "@/lib/mock-data";
 
-export default function Home() {
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState("");
-  const [activeProject, setActiveProject] = useState("desaire-1");
-  const [activeQuickAction, setActiveQuickAction] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+// Result types
+type ResultType =
+  | { kind: "script"; data: ScriptData }
+  | {
+      kind: "images";
+      shotName: string;
+      variations: ImageVariation[];
+      status: "generating" | "complete" | "failed";
+      progress: number;
+      jobId?: string;
+    }
+  | {
+      kind: "video";
+      data: VideoData;
+      jobId?: string;
+    }
+  | {
+      kind: "broll";
+      shotName: string;
+      status: "generating" | "complete" | "failed";
+      progress: number;
+      videoUrl?: string;
+      jobId?: string;
+    };
 
-  // Script form state
-  const [scriptForm, setScriptForm] = useState({
-    product: "",
-    audience: "",
-    outcome: "",
-    differentiator: "",
-    proof: "",
-    speed: "fast",
-  });
+interface Result {
+  id: string;
+  timestamp: string;
+  prompt: string;
+  result: ResultType;
+}
 
-  // Image form state
-  const [imagePrompt, setImagePrompt] = useState("");
-  const [selectedActor, setSelectedActor] = useState<string | null>(null);
+export default function HomePage() {
+  // Navigation state
+  const [activeNav, setActiveNav] = useState<"create" | "library" | "settings">(
+    "create"
+  );
+  const [activeTab, setActiveTab] = useState<ModeTab>("script");
+  const [activeProject, setActiveProject] = useState<string | null>("1");
+
+  // Actor state
   const [actors, setActors] = useState<Actor[]>([]);
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  const [selectedActors, setSelectedActors] = useState<Actor[]>([]);
+  const [showActorGallery, setShowActorGallery] = useState(false);
+  const [showCreateActor, setShowCreateActor] = useState(false);
 
-  // Video form state
-  const [videoScript, setVideoScript] = useState("");
-  const [videoImageUrl, setVideoImageUrl] = useState("");
-  const [videoAction, setVideoAction] = useState("");
-  const [videoVoice, setVideoVoice] = useState("aria");
-  const [videoEngine, setVideoEngine] = useState<"sadtalker" | "kling">("sadtalker");
-  const [videoMode, setVideoMode] = useState<"easy" | "custom">("easy");
-  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-  const [voices, setVoices] = useState<VoicePreset[]>([]);
+  // Generation state
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [results, setResults] = useState<Result[]>([]);
+  const [credits, setCredits] = useState(50);
+  const resultsRef = useRef<HTMLDivElement>(null);
 
-  // Voice form state
-  const [voiceText, setVoiceText] = useState("");
-  const [voiceSelected, setVoiceSelected] = useState("aria");
-  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
-
-  // B-Roll form state
-  const [brollImageUrl, setBrollImageUrl] = useState("");
-  const [brollAction, setBrollAction] = useState("");
-  const [brollDuration, setBrollDuration] = useState(5);
-  const [isGeneratingBroll, setIsGeneratingBroll] = useState(false);
-
-  // Voice unification state
-  const [isUnifyingVoice, setIsUnifyingVoice] = useState(false);
-
-  // Timeline / Edit state
-  const [timelineClips, setTimelineClips] = useState<(CompileClip & { id: string; name: string; thumbnailUrl?: string })[]>([]);
-  const [fullScriptText, setFullScriptText] = useState("");
-  const [unifiedVoiceUrl, setUnifiedVoiceUrl] = useState("");
-
-  // Load actors and voices on mount
+  // Fetch actors on mount
   useEffect(() => {
-    getActors().then(setActors).catch(console.error);
-    getVoices().then(setVoices).catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  // Poll for image generation status
-  const pollImageStatus = useCallback(async (jobId: string, loadingMsgId: string, shotName: string) => {
-    const poll = async () => {
-      try {
-        const status = await checkImageStatus(jobId);
-
-        if (status.status === "processing") {
-          // Update progress in loading message
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === loadingMsgId
-                ? { ...m, content: "image-loading", data: { progress: status.progress, shotName } }
-                : m
-            )
-          );
-          setTimeout(poll, 2000);
-        } else if (status.status === "complete") {
-          // Replace loading with ImageCard
-          const variations = status.images.map((img, i) => ({
-            id: img.id,
-            url: img.url,
-            selected: false,
-          }));
-
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === loadingMsgId
-                ? {
-                    ...m,
-                    content: "image",
-                    data: { shotName, variations },
-                  }
-                : m
-            )
-          );
-          setIsGeneratingImage(false);
-        } else if (status.status === "failed") {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === loadingMsgId
-                ? {
-                    ...m,
-                    content: `Image generation failed: ${status.error || "Unknown error"}`,
-                    data: undefined,
-                  }
-                : m
-            )
-          );
-          setIsGeneratingImage(false);
-        } else {
-          // pending
-          setTimeout(poll, 2000);
-        }
-      } catch (err) {
-        console.error("Poll error:", err);
-        setTimeout(poll, 3000);
-      }
-    };
-
-    setTimeout(poll, 2000);
-  }, []);
-
-  const handleGenerateImage = async (prompt: string, shotName: string = "Custom") => {
-    if (!prompt.trim()) return;
-
-    const userMsg: Message = {
-      id: String(Date.now()),
-      role: "user",
-      content: `Generate first frame image: "${prompt}"`,
-    };
-
-    const loadingMsgId = String(Date.now() + 1);
-    const loadingMsg: Message = {
-      id: loadingMsgId,
-      role: "assistant",
-      content: "image-loading",
-      data: { progress: 0, shotName },
-    };
-
-    setMessages((prev) => [...prev, userMsg, loadingMsg]);
-    setActiveQuickAction(null);
-    setIsGeneratingImage(true);
-    setImagePrompt("");
-
-    try {
-      const jobId = await generateImages(prompt, undefined, selectedActor || undefined, 4);
-      pollImageStatus(jobId, loadingMsgId, shotName);
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === loadingMsgId
-            ? {
-                ...m,
-                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-                data: undefined,
-              }
-            : m
-        )
-      );
-      setIsGeneratingImage(false);
-    }
-  };
-
-  const handleImageEdit = async (imageUrl: string, prompt: string) => {
-    const loadingMsgId = String(Date.now());
-    const loadingMsg: Message = {
-      id: loadingMsgId,
-      role: "assistant",
-      content: "image-loading",
-      data: { progress: 0, shotName: "Magic Edit" },
-    };
-
-    setMessages((prev) => [...prev, loadingMsg]);
-    setIsGeneratingImage(true);
-
-    try {
-      const jobId = await editImage(imageUrl, prompt);
-      pollImageStatus(jobId, loadingMsgId, "Magic Edit");
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === loadingMsgId
-            ? {
-                ...m,
-                content: `Edit error: ${err instanceof Error ? err.message : "Unknown error"}`,
-                data: undefined,
-              }
-            : m
-        )
-      );
-      setIsGeneratingImage(false);
-    }
-  };
-
-  // Called from ScriptCard shotlist "Image" button
-  const handleShotImageGenerate = (shotName: string, action: string) => {
-    setImagePrompt(action);
-    setActiveQuickAction("image");
-    // Auto-generate with the action as prompt
-    handleGenerateImage(action, shotName);
-  };
-
-  // Called from ScriptCard shotlist "Video" button
-  const handleShotVideoGenerate = (shotName: string, script: string, action: string) => {
-    setVideoScript(script);
-    setVideoAction(action);
-    setActiveQuickAction("video");
-  };
-
-  // Called from ScriptCard shotlist "Motion" button (B-roll)
-  const handleShotBrollGenerate = (shotName: string, action: string) => {
-    setBrollAction(action);
-    // Try to find last generated image to use
-    let imgUrl = "";
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.content === "image" && msg.data?.variations?.length > 0) {
-        const selected = msg.data.variations.find((v: { selected?: boolean }) => v.selected);
-        imgUrl = selected?.url || msg.data.variations[0].url;
-        break;
-      }
-    }
-    if (imgUrl) {
-      // Auto-generate B-roll
-      handleGenerateBroll(imgUrl, action, shotName);
-    } else {
-      // First generate the image
-      handleGenerateImage(action, shotName);
-    }
-  };
-
-  // Poll for B-Roll generation status
-  const pollBrollStatus = useCallback(async (jobId: string, loadingMsgId: string, shotName: string) => {
-    const poll = async () => {
-      try {
-        const status = await checkBrollStatus(jobId);
-        if (status.status === "processing") {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === loadingMsgId
-                ? {
-                    ...m,
-                    content: "video",
-                    data: {
-                      shotName,
-                      engine: "Ken Burns (ffmpeg)",
-                      duration: "...",
-                      resolution: "768x1024",
-                      cost: "Free",
-                      voice: "—",
-                      status: "generating",
-                      progress: status.progress || 0,
-                      step: status.step,
-                      thumbnailUrl: "",
-                    },
-                  }
-                : m
-            )
-          );
-          setTimeout(poll, 2000);
-        } else if (status.status === "complete") {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === loadingMsgId
-                ? {
-                    ...m,
-                    content: "video",
-                    data: {
-                      shotName,
-                      engine: status.engine || "Ken Burns",
-                      duration: status.duration || "5s",
-                      resolution: "768x1024",
-                      cost: "Free",
-                      voice: "—",
-                      status: "complete",
-                      progress: 100,
-                      thumbnailUrl: "",
-                      videoUrl: status.videoUrl,
-                      effect: status.effect,
-                    },
-                  }
-                : m
-            )
-          );
-          setIsGeneratingBroll(false);
-        } else if (status.status === "failed") {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === loadingMsgId
-                ? {
-                    ...m,
-                    content: `B-Roll generation failed: ${status.error || "Unknown error"}`,
-                    data: undefined,
-                  }
-                : m
-            )
-          );
-          setIsGeneratingBroll(false);
-        } else {
-          setTimeout(poll, 2000);
-        }
-      } catch (err) {
-        console.error("B-Roll poll error:", err);
-        setTimeout(poll, 3000);
-      }
-    };
-    setTimeout(poll, 2000);
-  }, []);
-
-  const handleGenerateBroll = async (imageUrl?: string, actionPrompt?: string, shotName?: string) => {
-    const imgUrl = imageUrl || brollImageUrl;
-    const action = actionPrompt || brollAction;
-    const name = shotName || "B-Roll";
-
-    if (!imgUrl) {
-      // Try to find the last generated image
-      let foundUrl = "";
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (msg.content === "image" && msg.data?.variations?.length > 0) {
-          const selected = msg.data.variations.find((v: { selected?: boolean }) => v.selected);
-          foundUrl = selected?.url || msg.data.variations[0].url;
-          break;
-        }
-      }
-      if (!foundUrl) {
-        setMessages((prev) => [
-          ...prev,
+    getActors()
+      .then(setActors)
+      .catch(() => {
+        // Use some fallback actors
+        setActors([
           {
-            id: String(Date.now()),
-            role: "assistant" as const,
-            content: "Please generate or provide an image first — I need a source image for the B-Roll motion video.",
+            id: "a1",
+            name: "Mabel",
+            imageUrl:
+              "https://images.unsplash.com/photo-1529626455594-4ff0802cfb7e?w=400&h=600&fit=crop&crop=face",
+            description: "Young woman, casual",
+          },
+          {
+            id: "a2",
+            name: "Amelia",
+            imageUrl:
+              "https://images.unsplash.com/photo-1494790108755-2616b612b786?w=400&h=600&fit=crop&crop=face",
+            description: "Professional woman",
+          },
+          {
+            id: "a3",
+            name: "Isla",
+            imageUrl:
+              "https://images.unsplash.com/photo-1517841905240-472988babdf9?w=400&h=600&fit=crop&crop=face",
+            description: "Fashion model",
+          },
+          {
+            id: "a4",
+            name: "Harper",
+            imageUrl:
+              "https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=400&h=600&fit=crop&crop=face",
+            description: "Natural look",
+          },
+          {
+            id: "a5",
+            name: "Luna",
+            imageUrl:
+              "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=400&h=600&fit=crop&crop=face",
+            description: "Creative artist",
+          },
+          {
+            id: "a6",
+            name: "Bel",
+            imageUrl:
+              "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=400&h=600&fit=crop&crop=face",
+            description: "Male model",
           },
         ]);
-        return;
-      }
-    }
-
-    const finalImgUrl = imgUrl || "";
-
-    const userMsg: Message = {
-      id: String(Date.now()),
-      role: "user",
-      content: `Generate B-Roll motion video: "${action || 'zoom in'}"`,
-    };
-
-    const loadingMsgId = String(Date.now() + 1);
-    const loadingMsg: Message = {
-      id: loadingMsgId,
-      role: "assistant",
-      content: "video",
-      data: {
-        shotName: name,
-        engine: "Ken Burns (ffmpeg)",
-        duration: `${brollDuration}s`,
-        resolution: "768x1024",
-        cost: "Free",
-        voice: "—",
-        status: "generating",
-        progress: 0,
-        step: "Starting...",
-        thumbnailUrl: "",
-      },
-    };
-
-    setMessages((prev) => [...prev, userMsg, loadingMsg]);
-    setActiveQuickAction(null);
-    setIsGeneratingBroll(true);
-
-    try {
-      const jobId = await generateBroll(finalImgUrl, action || "zoom in", brollDuration);
-      pollBrollStatus(jobId, loadingMsgId, name);
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === loadingMsgId
-            ? {
-                ...m,
-                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-                data: undefined,
-              }
-            : m
-        )
-      );
-      setIsGeneratingBroll(false);
-    }
-  };
-
-  // --- Voice Unification ---
-  const handleUnifyVoice = async () => {
-    // Collect all audio URLs from messages
-    const audioUrls: string[] = [];
-    for (const msg of messages) {
-      if (msg.content === "audio" && msg.data?.audioUrl) {
-        audioUrls.push(msg.data.audioUrl);
-      }
-      // Also check video messages that have audio
-      if (msg.content === "video" && msg.data?.status === "complete" && msg.data?.videoUrl) {
-        // Videos contain their own audio, skip
-      }
-    }
-
-    if (audioUrls.length < 2) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now()),
-          role: "assistant" as const,
-          content: "Need at least 2 audio clips to unify. Generate more voiceovers first!",
-        },
-      ]);
-      return;
-    }
-
-    const userMsg: Message = {
-      id: String(Date.now()),
-      role: "user",
-      content: `Unify ${audioUrls.length} voice clips into one seamless track`,
-    };
-
-    const loadingMsgId = String(Date.now() + 1);
-    const loadingMsg: Message = {
-      id: loadingMsgId,
-      role: "assistant",
-      content: "loading",
-    };
-
-    setMessages((prev) => [...prev, userMsg, loadingMsg]);
-    setIsUnifyingVoice(true);
-
-    try {
-      // Convert absolute URLs back to relative for API
-      const relativeUrls = audioUrls.map((url) => {
-        const base = process.env.NEXT_PUBLIC_API_URL || "http://151.247.196.131:5010";
-        return url.startsWith(base) ? url.replace(base, "") : url;
       });
+  }, []);
 
-      const jobId = await unifyVoice(relativeUrls, voiceSelected);
+  // Scroll to bottom when results change
+  useEffect(() => {
+    if (resultsRef.current) {
+      resultsRef.current.scrollTo({
+        top: resultsRef.current.scrollHeight,
+        behavior: "smooth",
+      });
+    }
+  }, [results]);
 
-      // Poll for completion
+  // Poll for image status
+  const pollImageStatus = useCallback(
+    async (jobId: string, resultId: string) => {
       const poll = async () => {
         try {
-          const status = await checkUnifyStatus(jobId);
-          if (status.status === "processing") {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === loadingMsgId
-                  ? {
-                      ...m,
-                      content: "loading",
-                      data: { step: status.step, progress: status.progress },
-                    }
-                  : m
-              )
-            );
-            setTimeout(poll, 2000);
-          } else if (status.status === "complete") {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === loadingMsgId
-                  ? {
-                      ...m,
-                      content: "audio",
-                      data: {
-                        audioUrl: status.audioUrl,
-                        voice: `Unified (${status.clipCount} clips)`,
-                        text: `${status.clipCount} clips merged • ${status.duration}`,
-                      },
-                    }
-                  : m
-              )
-            );
-            setIsUnifyingVoice(false);
-          } else if (status.status === "failed") {
-            setMessages((prev) =>
-              prev.map((m) =>
-                m.id === loadingMsgId
-                  ? {
-                      ...m,
-                      content: `Voice unification failed: ${status.error || "Unknown error"}`,
-                      data: undefined,
-                    }
-                  : m
-              )
-            );
-            setIsUnifyingVoice(false);
-          } else {
-            setTimeout(poll, 2000);
+          const status: ImageJobStatus = await checkImageStatus(jobId);
+          setResults((prev) =>
+            prev.map((r) => {
+              if (r.id !== resultId || r.result.kind !== "images") return r;
+              return {
+                ...r,
+                result: {
+                  ...r.result,
+                  status: status.status === "complete" ? "complete" : status.status === "failed" ? "failed" : "generating",
+                  progress: status.progress || 0,
+                  variations:
+                    status.status === "complete"
+                      ? status.images.map((img) => ({
+                          id: img.id,
+                          url: img.url,
+                          selected: false,
+                        }))
+                      : r.result.variations,
+                },
+              };
+            })
+          );
+          if (status.status === "complete" || status.status === "failed") {
+            setIsGenerating(false);
+            return;
           }
-        } catch (err) {
-          console.error("Unify poll error:", err);
           setTimeout(poll, 3000);
+        } catch {
+          setIsGenerating(false);
         }
       };
-      setTimeout(poll, 2000);
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === loadingMsgId
-            ? {
-                ...m,
-                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-                data: undefined,
-              }
-            : m
-        )
-      );
-      setIsUnifyingVoice(false);
-    }
-  };
+      poll();
+    },
+    []
+  );
 
-  // Poll for video generation status
-  const pollVideoStatus = useCallback(async (jobId: string, loadingMsgId: string, shotName: string) => {
-    const poll = async () => {
-      try {
-        const status = await checkVideoStatus(jobId);
-        if (status.status === "processing") {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === loadingMsgId
-                ? {
-                    ...m,
-                    content: "video",
-                    data: {
-                      shotName,
-                      engine: status.engine || videoEngine === "sadtalker" ? "SadTalker (Free)" : "Kling 2.5",
-                      duration: status.duration || "...",
-                      resolution: "512x768",
-                      cost: videoEngine === "sadtalker" ? "Free" : "$0.50",
-                      voice: videoVoice,
-                      status: "generating",
-                      progress: status.progress || 0,
-                      step: status.step,
-                      thumbnailUrl: "",
-                    },
-                  }
-                : m
-            )
+  // Poll for video status
+  const pollVideoStatus = useCallback(
+    async (jobId: string, resultId: string) => {
+      const poll = async () => {
+        try {
+          const status: VideoJobStatus = await checkVideoStatus(jobId);
+          setResults((prev) =>
+            prev.map((r) => {
+              if (r.id !== resultId || r.result.kind !== "video") return r;
+              return {
+                ...r,
+                result: {
+                  ...r.result,
+                  data: {
+                    ...r.result.data,
+                    status:
+                      status.status === "complete"
+                        ? "complete"
+                        : "generating",
+                    progress: status.progress || 0,
+                    videoUrl: status.videoUrl,
+                    step: status.step,
+                    duration: status.duration || r.result.data.duration,
+                  },
+                },
+              };
+            })
           );
+          if (status.status === "complete" || status.status === "failed") {
+            setIsGenerating(false);
+            return;
+          }
           setTimeout(poll, 3000);
-        } else if (status.status === "complete") {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === loadingMsgId
-                ? {
-                    ...m,
-                    content: "video",
-                    data: {
-                      shotName,
-                      engine: status.engine || "SadTalker",
-                      duration: status.duration || "0s",
-                      resolution: "512x768",
-                      cost: videoEngine === "sadtalker" ? "Free" : "$0.50",
-                      voice: videoVoice,
-                      status: "complete",
-                      progress: 100,
-                      thumbnailUrl: "",
-                      videoUrl: status.videoUrl,
-                    },
-                  }
-                : m
-            )
+        } catch {
+          setIsGenerating(false);
+        }
+      };
+      poll();
+    },
+    []
+  );
+
+  // Poll for broll status
+  const pollBrollStatus = useCallback(
+    async (jobId: string, resultId: string) => {
+      const poll = async () => {
+        try {
+          const status: BrollJobStatus = await checkBrollStatus(jobId);
+          setResults((prev) =>
+            prev.map((r) => {
+              if (r.id !== resultId || r.result.kind !== "broll") return r;
+              return {
+                ...r,
+                result: {
+                  ...r.result,
+                  status:
+                    status.status === "complete"
+                      ? "complete"
+                      : status.status === "failed"
+                      ? "failed"
+                      : "generating",
+                  progress: status.progress || 0,
+                  videoUrl: status.videoUrl,
+                },
+              };
+            })
           );
-          setIsGeneratingVideo(false);
-        } else if (status.status === "failed") {
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === loadingMsgId
-                ? {
-                    ...m,
-                    content: `Video generation failed: ${status.error || "Unknown error"}`,
-                    data: undefined,
-                  }
-                : m
-            )
-          );
-          setIsGeneratingVideo(false);
-        } else {
+          if (status.status === "complete" || status.status === "failed") {
+            setIsGenerating(false);
+            return;
+          }
           setTimeout(poll, 3000);
+        } catch {
+          setIsGenerating(false);
         }
-      } catch (err) {
-        console.error("Video poll error:", err);
-        setTimeout(poll, 5000);
-      }
-    };
-    setTimeout(poll, 3000);
-  }, [videoEngine, videoVoice]);
+      };
+      poll();
+    },
+    []
+  );
 
-  const handleGenerateVideo = async () => {
-    if (!videoScript.trim()) return;
-    
-    // Need an image URL - use a placeholder or the last generated image
-    let imageUrl = videoImageUrl;
-    if (!imageUrl) {
-      // Try to find the last generated image from messages
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const msg = messages[i];
-        if (msg.content === "image" && msg.data?.variations?.length > 0) {
-          const selected = msg.data.variations.find((v: { selected?: boolean }) => v.selected);
-          imageUrl = selected?.url || msg.data.variations[0].url;
-          break;
-        }
-      }
-    }
-
-    if (!imageUrl) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now()),
-          role: "assistant" as const,
-          content: "Please generate or provide an image first — I need a source image for the talking head video. Enter an image URL in the Image URL field or generate one using the Image action.",
-        },
-      ]);
-      return;
-    }
-
-    const userMsg: Message = {
-      id: String(Date.now()),
-      role: "user",
-      content: `Generate talking head video: "${videoScript.slice(0, 80)}..."`,
-    };
-
-    const loadingMsgId = String(Date.now() + 1);
-    const loadingMsg: Message = {
-      id: loadingMsgId,
-      role: "assistant",
-      content: "video",
-      data: {
-        shotName: "Video",
-        engine: videoEngine === "sadtalker" ? "SadTalker (Free)" : "Kling 2.5",
-        duration: "...",
-        resolution: "512x768",
-        cost: videoEngine === "sadtalker" ? "Free" : "$0.50",
-        voice: videoVoice,
-        status: "generating",
-        progress: 0,
-        step: "Starting...",
-        thumbnailUrl: "",
-      },
-    };
-
-    setMessages((prev) => [...prev, userMsg, loadingMsg]);
-    setActiveQuickAction(null);
-    setIsGeneratingVideo(true);
+  // Handle prompt submission
+  const handleSubmit = async (
+    prompt: string,
+    model: string,
+    quantity: number,
+    settings: PromptSettings
+  ) => {
+    setIsGenerating(true);
+    const resultId = `r-${Date.now()}`;
+    const now = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
 
     try {
-      const jobId = await generateVideo(
-        imageUrl,
-        videoScript,
-        videoAction || undefined,
-        videoVoice,
-        videoMode,
-        videoEngine
-      );
-      pollVideoStatus(jobId, loadingMsgId, "Video");
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === loadingMsgId
-            ? {
-                ...m,
-                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-                data: undefined,
-              }
-            : m
-        )
-      );
-      setIsGeneratingVideo(false);
-    }
-  };
-
-  const handleGenerateVoice = async () => {
-    if (!voiceText.trim()) return;
-
-    const userMsg: Message = {
-      id: String(Date.now()),
-      role: "user",
-      content: `Generate voiceover: "${voiceText.slice(0, 60)}..."`,
-    };
-
-    const loadingMsgId = String(Date.now() + 1);
-    const loadingMsg: Message = {
-      id: loadingMsgId,
-      role: "assistant",
-      content: "loading",
-    };
-
-    setMessages((prev) => [...prev, userMsg, loadingMsg]);
-    setActiveQuickAction(null);
-    setIsGeneratingVoice(true);
-
-    try {
-      const result = await generateVoice(voiceText, voiceSelected);
-
-      setMessages((prev) => {
-        const withoutLoading = prev.filter((m) => m.id !== loadingMsgId);
-        return [
-          ...withoutLoading,
+      if (activeTab === "script") {
+        // Parse prompt for script params
+        const scriptData = await generateScript({
+          product: prompt,
+          audience: "Target audience",
+          outcome: "Drive conversions",
+          differentiator: "Unique value",
+          proof: "Social proof",
+          speed: "normal",
+        });
+        setResults((prev) => [
+          ...prev,
           {
-            id: String(Date.now() + 2),
-            role: "assistant" as const,
-            content: "audio",
-            data: {
-              audioUrl: result.audioUrl,
-              voice: result.voice,
-              text: voiceText,
+            id: resultId,
+            timestamp: now,
+            prompt,
+            result: { kind: "script", data: scriptData },
+          },
+        ]);
+        setIsGenerating(false);
+      } else if (activeTab === "image") {
+        const jobId = await generateImages(
+          prompt,
+          undefined,
+          selectedActors[0]?.id,
+          quantity
+        );
+        setResults((prev) => [
+          ...prev,
+          {
+            id: resultId,
+            timestamp: now,
+            prompt,
+            result: {
+              kind: "images",
+              shotName: "Custom",
+              variations: [],
+              status: "generating",
+              progress: 0,
+              jobId,
             },
           },
-        ];
-      });
-
-      setVoiceText("");
+        ]);
+        pollImageStatus(jobId, resultId);
+      } else if (activeTab === "talking-avatar") {
+        if (!selectedActors[0]) {
+          setShowActorGallery(true);
+          setIsGenerating(false);
+          return;
+        }
+        const jobId = await generateVideo(
+          selectedActors[0].imageUrl,
+          prompt,
+          undefined,
+          undefined,
+          "easy",
+          model === "kling" ? "kling" : "sadtalker"
+        );
+        setResults((prev) => [
+          ...prev,
+          {
+            id: resultId,
+            timestamp: now,
+            prompt,
+            result: {
+              kind: "video",
+              data: {
+                shotName: "Talking Avatar",
+                engine: model === "kling" ? "Kling 2.6" : "SadTalker",
+                duration: settings.duration,
+                resolution:
+                  settings.orientation === "portrait"
+                    ? "1080x1920"
+                    : "1920x1080",
+                cost: "$5.00",
+                voice: "aria",
+                status: "generating",
+                progress: 0,
+                thumbnailUrl: selectedActors[0].imageUrl,
+              },
+              jobId,
+            },
+          },
+        ]);
+        pollVideoStatus(jobId, resultId);
+      } else {
+        // More tab — try broll
+        const jobId = await generateImages(prompt, undefined, undefined, quantity);
+        setResults((prev) => [
+          ...prev,
+          {
+            id: resultId,
+            timestamp: now,
+            prompt,
+            result: {
+              kind: "images",
+              shotName: "Custom",
+              variations: [],
+              status: "generating",
+              progress: 0,
+              jobId,
+            },
+          },
+        ]);
+        pollImageStatus(jobId, resultId);
+      }
     } catch (err) {
-      setMessages((prev) => {
-        const withoutLoading = prev.filter((m) => m.id !== loadingMsgId);
-        return [
-          ...withoutLoading,
-          {
-            id: String(Date.now() + 2),
-            role: "assistant" as const,
-            content: `Voice error: ${err instanceof Error ? err.message : "Unknown error"}`,
-          },
-        ];
-      });
-    } finally {
-      setIsGeneratingVoice(false);
-    }
-  };
-
-  const handleGenerateScript = async () => {
-    if (!scriptForm.product.trim() || !scriptForm.audience.trim()) return;
-
-    const userMsg: Message = {
-      id: String(Date.now()),
-      role: "user",
-      content: `Generate a UGC ad script for ${scriptForm.product} targeting ${scriptForm.audience}`,
-    };
-
-    const loadingMsg: Message = {
-      id: String(Date.now() + 1),
-      role: "assistant",
-      content: "loading",
-    };
-
-    setMessages((prev) => [...prev, userMsg, loadingMsg]);
-    setActiveQuickAction(null);
-    setIsGenerating(true);
-
-    try {
-      const scriptData = await generateScript(scriptForm);
-
-      setMessages((prev) => {
-        const withoutLoading = prev.filter((m) => m.id !== loadingMsg.id);
-        return [
-          ...withoutLoading,
-          {
-            id: String(Date.now() + 2),
-            role: "assistant" as const,
-            content: "script",
-            data: scriptData,
-          },
-        ];
-      });
-
-      setScriptForm({
-        product: "",
-        audience: "",
-        outcome: "",
-        differentiator: "",
-        proof: "",
-        speed: "fast",
-      });
-    } catch (err) {
-      setMessages((prev) => {
-        const withoutLoading = prev.filter((m) => m.id !== loadingMsg.id);
-        return [
-          ...withoutLoading,
-          {
-            id: String(Date.now() + 2),
-            role: "assistant" as const,
-            content: `Error generating script: ${err instanceof Error ? err.message : "Unknown error"}`,
-          },
-        ];
-      });
-    } finally {
+      console.error("Generation failed:", err);
       setIsGenerating(false);
     }
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || isGenerating) return;
-    const userInput = input.trim();
-    const newMsg: Message = {
-      id: String(Date.now()),
-      role: "user",
-      content: userInput,
-    };
-    setMessages((prev) => [...prev, newMsg]);
-    setInput("");
-    setActiveQuickAction(null);
-
-    const scriptKeywords = ["script", "ad", "ugc", "create", "generate", "write"];
-    const isScriptRequest = scriptKeywords.some((kw) =>
-      userInput.toLowerCase().includes(kw)
-    );
-
-    if (isScriptRequest && messages.length === 0) {
-      setMessages((prev) => [
+  // Script card actions
+  const handleScriptGenerateImage = async (
+    shotName: string,
+    action: string
+  ) => {
+    setIsGenerating(true);
+    const resultId = `r-${Date.now()}`;
+    const now = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    try {
+      const jobId = await generateImages(action, undefined, selectedActors[0]?.id, 4);
+      setResults((prev) => [
         ...prev,
         {
-          id: String(Date.now() + 1),
-          role: "assistant",
-          content:
-            "I can generate a script for you! Use the Script quick action below to fill in the details, or tell me more about your product and I'll help you get started.",
+          id: resultId,
+          timestamp: now,
+          prompt: `Image for ${shotName}: ${action}`,
+          result: {
+            kind: "images",
+            shotName,
+            variations: [],
+            status: "generating",
+            progress: 0,
+            jobId,
+          },
         },
       ]);
-      setActiveQuickAction("script");
-    } else {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: String(Date.now() + 1),
-          role: "assistant",
-          content:
-            "Got it! Use the quick action buttons below to generate scripts, images, videos, or voiceovers. For scripts, click the Script button and fill in your product details.",
-        },
-      ]);
+      pollImageStatus(jobId, resultId);
+    } catch {
+      setIsGenerating(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
+  const handleScriptGenerateVideo = async (
+    shotName: string,
+    script: string,
+    action: string
+  ) => {
+    if (!selectedActors[0]) {
+      setShowActorGallery(true);
+      return;
+    }
+    setIsGenerating(true);
+    const resultId = `r-${Date.now()}`;
+    const now = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    try {
+      const jobId = await generateVideo(
+        selectedActors[0].imageUrl,
+        script,
+        action
+      );
+      setResults((prev) => [
+        ...prev,
+        {
+          id: resultId,
+          timestamp: now,
+          prompt: `Video for ${shotName}`,
+          result: {
+            kind: "video",
+            data: {
+              shotName,
+              engine: "SadTalker",
+              duration: "10s",
+              resolution: "1080x1920",
+              cost: "$5.00",
+              voice: "aria",
+              status: "generating",
+              progress: 0,
+              thumbnailUrl: selectedActors[0].imageUrl,
+            },
+            jobId,
+          },
+        },
+      ]);
+      pollVideoStatus(jobId, resultId);
+    } catch {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleScriptGenerateBroll = async (
+    shotName: string,
+    action: string
+  ) => {
+    setIsGenerating(true);
+    const resultId = `r-${Date.now()}`;
+    const now = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+    try {
+      // First generate an image, then we can motion it
+      const jobId = await generateImages(action, undefined, undefined, 4);
+      setResults((prev) => [
+        ...prev,
+        {
+          id: resultId,
+          timestamp: now,
+          prompt: `B-Roll for ${shotName}: ${action}`,
+          result: {
+            kind: "images",
+            shotName: `${shotName} (B-Roll)`,
+            variations: [],
+            status: "generating",
+            progress: 0,
+            jobId,
+          },
+        },
+      ]);
+      pollImageStatus(jobId, resultId);
+    } catch {
+      setIsGenerating(false);
     }
   };
 
   return (
-    <div className="flex h-screen bg-[#0a0a0a] text-white overflow-hidden">
+    <div className="h-screen flex bg-[#0f0f0f]">
       {/* Sidebar */}
-      <Sidebar activeProject={activeProject} onSelectProject={setActiveProject} />
+      <Sidebar
+        projects={MOCK_PROJECTS}
+        activeProject={activeProject}
+        onSelectProject={setActiveProject}
+        onNewProject={() => {}}
+        activeNav={activeNav}
+        onNavChange={setActiveNav}
+      />
 
-      {/* Main Area */}
+      {/* Main content */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="h-12 border-b border-[#1e1e3a] flex items-center px-5 shrink-0">
-          <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-[#6C5CE7]" />
-            <span className="text-sm font-semibold">Creative Studio</span>
-          </div>
-        </div>
+        {/* Top bar */}
+        <TopBar credits={credits} />
 
-        {/* Chat Area */}
-        <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-          {messages.length === 0 && (
-            <div className="flex items-center justify-center h-full">
-              <div className="text-center space-y-3 max-w-md">
-                <div className="w-12 h-12 rounded-2xl bg-[#6C5CE7]/20 flex items-center justify-center mx-auto">
-                  <Sparkles className="w-6 h-6 text-[#6C5CE7]" />
-                </div>
-                <h2 className="text-lg font-semibold text-white/90">Creative Studio</h2>
-                <p className="text-[13px] text-[#888] leading-relaxed">
-                  Generate ad scripts, images, videos and voiceovers — all powered by AI.
-                  <br />
-                  Click <span className="text-[#6C5CE7] font-medium">Script</span> below to get started.
+        {/* Content area */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Results / scrollable area */}
+          <div
+            ref={resultsRef}
+            className="flex-1 overflow-y-auto px-8 py-6"
+          >
+            {/* Welcome message (show when no results) */}
+            {results.length === 0 && (
+              <div className="flex flex-col items-center justify-center h-full -mt-20">
+                <p className="text-[16px] text-[#888] mb-8">
+                  Hey, let&apos;s create amazing ads! ✨
                 </p>
+
+                {/* Mode tabs */}
+                <ModeTabs activeTab={activeTab} onTabChange={setActiveTab} />
               </div>
-            </div>
-          )}
+            )}
 
-          {messages.map((msg) => (
-            <div key={msg.id}>
-              {msg.role === "user" ? (
-                <div className="flex justify-end">
-                  <div className="max-w-[70%] bg-[#6C5CE7]/10 border border-[#6C5CE7]/20 rounded-2xl rounded-br-md px-4 py-3">
-                    <p className="text-[13px] text-white/90">{msg.content}</p>
-                  </div>
+            {/* Results */}
+            {results.length > 0 && (
+              <div className="max-w-[800px] mx-auto space-y-4">
+                {/* Mode tabs (sticky-ish at top) */}
+                <div className="mb-6">
+                  <ModeTabs activeTab={activeTab} onTabChange={setActiveTab} />
                 </div>
-              ) : (
-                <div className="flex justify-start">
-                  <div className="max-w-[85%] space-y-2">
-                    {msg.content === "loading" && (
-                      <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-2">
-                        <Loader2 className="w-4 h-4 text-[#6C5CE7] animate-spin" />
-                        <p className="text-[13px] text-white/60">Generating script...</p>
-                      </div>
-                    )}
-                    {msg.content === "image-loading" && msg.data && (
-                      <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
-                          <p className="text-[13px] text-white/60">
-                            Generating images for {msg.data.shotName}...
-                          </p>
-                        </div>
-                        {msg.data.progress > 0 && (
-                          <div className="w-full bg-white/10 rounded-full h-1.5">
-                            <div
-                              className="bg-emerald-400 h-1.5 rounded-full transition-all duration-500"
-                              style={{ width: `${msg.data.progress}%` }}
-                            />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                    {msg.content === "script" && msg.data && (
-                      <ScriptCard data={msg.data} onGenerateImage={handleShotImageGenerate} onGenerateVideo={handleShotVideoGenerate} onGenerateBroll={handleShotBrollGenerate} />
-                    )}
-                    {msg.content === "image" && msg.data && (
-                      <ImageCard
-                        shotName={msg.data.shotName}
-                        variations={msg.data.variations}
-                        onEdit={handleImageEdit}
-                      />
-                    )}
-                    {msg.content === "video" && msg.data && (
-                      <VideoCard data={msg.data} />
-                    )}
-                    {msg.content === "audio" && msg.data && (
-                      <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3 space-y-2">
-                        <div className="flex items-center gap-2">
-                          <Mic className="w-4 h-4 text-emerald-400" />
-                          <span className="text-[13px] text-white font-medium">Voiceover Generated</span>
-                        </div>
-                        <p className="text-[11px] text-muted">&ldquo;{msg.data.text}&rdquo;</p>
-                        <audio controls className="w-full h-8 mt-1" src={msg.data.audioUrl}>
-                          Your browser does not support audio.
-                        </audio>
-                        <p className="text-[10px] text-muted">Voice: {msg.data.voice}</p>
-                      </div>
-                    )}
-                    {msg.content !== "script" &&
-                      msg.content !== "image" &&
-                      msg.content !== "video" &&
-                      msg.content !== "audio" &&
-                      msg.content !== "loading" &&
-                      msg.content !== "image-loading" && (
-                        <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3">
-                          <p className="text-[13px] text-white/80">{msg.content}</p>
-                        </div>
-                      )}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-          <div ref={chatEndRef} />
-        </div>
 
-        {/* Quick Action Panel */}
-        {activeQuickAction && (
-          <div className="px-6 pb-2">
-            <div className="bg-[#141420] border border-[#1e1e3a] rounded-xl p-4">
-              {activeQuickAction === "script" && (
-                <div className="space-y-3">
-                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Script</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
-                      placeholder="Product name or description..."
-                      value={scriptForm.product}
-                      onChange={(e) => setScriptForm({ ...scriptForm, product: e.target.value })}
-                    />
-                    <input
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
-                      placeholder="Target audience..."
-                      value={scriptForm.audience}
-                      onChange={(e) => setScriptForm({ ...scriptForm, audience: e.target.value })}
-                    />
-                    <input
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
-                      placeholder="Desired outcome (e.g. app downloads)..."
-                      value={scriptForm.outcome}
-                      onChange={(e) => setScriptForm({ ...scriptForm, outcome: e.target.value })}
-                    />
-                    <input
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
-                      placeholder="Key differentiator..."
-                      value={scriptForm.differentiator}
-                      onChange={(e) => setScriptForm({ ...scriptForm, differentiator: e.target.value })}
-                    />
-                    <input
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
-                      placeholder="Social proof (e.g. 100k+ users)..."
-                      value={scriptForm.proof}
-                      onChange={(e) => setScriptForm({ ...scriptForm, proof: e.target.value })}
-                    />
-                    <select
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white focus:border-[#6C5CE7] focus:outline-none"
-                      value={scriptForm.speed}
-                      onChange={(e) => setScriptForm({ ...scriptForm, speed: e.target.value })}
-                    >
-                      <option value="fast">Fast (~10s)</option>
-                      <option value="quality">Quality (~30s)</option>
-                    </select>
-                  </div>
-                  <button
-                    onClick={handleGenerateScript}
-                    disabled={isGenerating || !scriptForm.product.trim() || !scriptForm.audience.trim()}
-                    className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
-                  >
-                    {isGenerating ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Generating...
-                      </>
-                    ) : (
-                      "Generate Script ~$0.02"
-                    )}
-                  </button>
-                </div>
-              )}
-              {activeQuickAction === "image" && (
-                <div className="space-y-3">
-                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Image</p>
-                  <div className="flex gap-2">
-                    {actors.length > 0
-                      ? actors.map((actor) => (
-                          <div
-                            key={actor.id}
-                            onClick={() => setSelectedActor(selectedActor === actor.id ? null : actor.id)}
-                            className="flex flex-col items-center gap-1 cursor-pointer group"
-                          >
-                            <div
-                              className={`w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-[10px] text-[#888] transition-all ${
-                                selectedActor === actor.id
-                                  ? "ring-2 ring-[#6C5CE7] bg-[#6C5CE7]/20"
-                                  : "group-hover:ring-2 ring-[#6C5CE7]"
-                              }`}
-                            >
-                              {actor.name[0]}
-                            </div>
-                            <span className={`text-[10px] ${selectedActor === actor.id ? "text-[#6C5CE7]" : "text-[#888]"}`}>
-                              {actor.name}
-                            </span>
-                          </div>
-                        ))
-                      : ["Sarah", "Mike", "Aisha", "James", "Yuki", "Nina"].map((name) => (
-                          <div key={name} className="flex flex-col items-center gap-1 cursor-pointer group">
-                            <div className="w-10 h-10 rounded-full bg-white/10 group-hover:ring-2 ring-[#6C5CE7] transition-all flex items-center justify-center text-[10px] text-[#888]">
-                              {name[0]}
-                            </div>
-                            <span className="text-[10px] text-[#888]">{name}</span>
-                          </div>
-                        ))}
-                  </div>
-                  <textarea
-                    className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-16"
-                    placeholder="Describe the image..."
-                    value={imagePrompt}
-                    onChange={(e) => setImagePrompt(e.target.value)}
-                  />
-                  <button
-                    onClick={() => handleGenerateImage(imagePrompt)}
-                    disabled={isGeneratingImage || !imagePrompt.trim()}
-                    className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
-                  >
-                    {isGeneratingImage ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Generating...
-                      </>
-                    ) : (
-                      "Generate 4 Variations ~$0.20"
-                    )}
-                  </button>
-                </div>
-              )}
-              {activeQuickAction === "video" && (
-                <div className="space-y-3">
-                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Talking Head Video</p>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={() => setVideoMode("easy")}
-                      className={`text-[12px] px-3 py-1.5 rounded-lg font-medium transition-colors ${videoMode === "easy" ? "bg-[#6C5CE7]/20 text-[#6C5CE7]" : "bg-white/5 text-[#888] hover:text-white"}`}
-                    >
-                      Easy Mode
-                    </button>
-                    <button
-                      onClick={() => setVideoMode("custom")}
-                      className={`text-[12px] px-3 py-1.5 rounded-lg font-medium transition-colors ${videoMode === "custom" ? "bg-[#6C5CE7]/20 text-[#6C5CE7]" : "bg-white/5 text-[#888] hover:text-white"}`}
-                    >
-                      Custom Mode
-                    </button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none col-span-2"
-                      placeholder="Image URL (or leave empty to use last generated image)..."
-                      value={videoImageUrl}
-                      onChange={(e) => setVideoImageUrl(e.target.value)}
-                    />
-                    <textarea
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-16 col-span-2"
-                      placeholder="Script text (what the person says)..."
-                      value={videoScript}
-                      onChange={(e) => setVideoScript(e.target.value)}
-                    />
-                    {videoMode === "custom" && (
-                      <textarea
-                        className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-12 col-span-2"
-                        placeholder="Action description (optional)..."
-                        value={videoAction}
-                        onChange={(e) => setVideoAction(e.target.value)}
-                      />
-                    )}
-                  </div>
-                  <div className="flex gap-2 items-center flex-wrap">
-                    <select
-                      className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none"
-                      value={videoEngine}
-                      onChange={(e) => setVideoEngine(e.target.value as "sadtalker" | "kling")}
-                    >
-                      <option value="sadtalker">SadTalker (Free)</option>
-                      <option value="kling">Kling 2.5 ($0.50)</option>
-                    </select>
-                    <select
-                      className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none"
-                      value={videoVoice}
-                      onChange={(e) => setVideoVoice(e.target.value)}
-                    >
-                      {voices.length > 0
-                        ? voices.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.name}
-                            </option>
-                          ))
-                        : ["Aria", "Jenny", "Guy", "Sara", "Tony", "Emma", "Brian"].map((name) => (
-                            <option key={name.toLowerCase()} value={name.toLowerCase()}>
-                              {name}
-                            </option>
-                          ))}
-                    </select>
-                    <button
-                      onClick={handleGenerateVideo}
-                      disabled={isGeneratingVideo || !videoScript.trim()}
-                      className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
-                    >
-                      {isGeneratingVideo ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        `Generate Video ${videoEngine === "sadtalker" ? "(Free)" : "~$0.50"}`
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {activeQuickAction === "voice" && (
-                <div className="space-y-3">
-                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Voiceover (TTS)</p>
-                  <textarea
-                    className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-16"
-                    placeholder="Text to speak..."
-                    value={voiceText}
-                    onChange={(e) => setVoiceText(e.target.value)}
-                  />
-                  <div className="flex gap-2 items-center">
-                    <select
-                      className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none"
-                      value={voiceSelected}
-                      onChange={(e) => setVoiceSelected(e.target.value)}
-                    >
-                      {voices.length > 0
-                        ? voices.map((v) => (
-                            <option key={v.id} value={v.id}>
-                              {v.name}
-                            </option>
-                          ))
-                        : ["Aria", "Jenny", "Guy", "Sara", "Tony", "Emma", "Brian"].map((name) => (
-                            <option key={name.toLowerCase()} value={name.toLowerCase()}>
-                              {name}
-                            </option>
-                          ))}
-                    </select>
-                    <button
-                      onClick={handleGenerateVoice}
-                      disabled={isGeneratingVoice || !voiceText.trim()}
-                      className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
-                    >
-                      {isGeneratingVoice ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        "Generate Voice (Free)"
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {activeQuickAction === "broll" && (
-                <div className="space-y-3">
-                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate B-Roll Motion Video</p>
-                  <p className="text-[11px] text-[#666]">Turn a static image into a motion video with Ken Burns effects (zoom, pan, etc.)</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <input
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none col-span-2"
-                      placeholder="Image URL (or leave empty to use last generated image)..."
-                      value={brollImageUrl}
-                      onChange={(e) => setBrollImageUrl(e.target.value)}
-                    />
-                    <textarea
-                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-12 col-span-2"
-                      placeholder="Motion description (e.g. 'zoom in slowly', 'pan left', 'zoom out')..."
-                      value={brollAction}
-                      onChange={(e) => setBrollAction(e.target.value)}
-                    />
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <select
-                      className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none"
-                      value={brollDuration}
-                      onChange={(e) => setBrollDuration(Number(e.target.value))}
-                    >
-                      <option value={3}>3 seconds</option>
-                      <option value={5}>5 seconds</option>
-                      <option value={8}>8 seconds</option>
-                      <option value={10}>10 seconds</option>
-                    </select>
-                    <button
-                      onClick={() => handleGenerateBroll()}
-                      disabled={isGeneratingBroll}
-                      className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
-                    >
-                      {isGeneratingBroll ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          Generating...
-                        </>
-                      ) : (
-                        "Generate B-Roll (Free)"
-                      )}
-                    </button>
-                  </div>
-                </div>
-              )}
-              {activeQuickAction === "unify" && (
-                <div className="space-y-3">
-                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Unify Voice Clips</p>
-                  <p className="text-[11px] text-[#666]">
-                    Merge all generated voiceover clips into one seamless audio track with normalized volume.
-                    {(() => {
-                      const count = messages.filter(m => m.content === "audio" && m.data?.audioUrl).length;
-                      return count > 0
-                        ? ` Found ${count} audio clip${count > 1 ? 's' : ''} in this session.`
-                        : ' No audio clips found yet — generate some voiceovers first.';
-                    })()}
-                  </p>
-                  <button
-                    onClick={handleUnifyVoice}
-                    disabled={isUnifyingVoice || messages.filter(m => m.content === "audio" && m.data?.audioUrl).length < 2}
-                    className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
-                  >
-                    {isUnifyingVoice ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        Unifying...
-                      </>
-                    ) : (
-                      "Unify Voice (Free)"
-                    )}
-                  </button>
-                </div>
-              )}
-              {activeQuickAction === "edit" && (
-                <div className="space-y-4">
-                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Edit & Compile Timeline</p>
-                  {(() => {
-                    // Collect all completed video clips from messages
-                    const videoClips = messages
-                      .filter(m => m.content === "video" && m.data?.status === "complete" && m.data?.videoUrl)
-                      .map((m, i) => ({
-                        id: `clip-${i}`,
-                        type: (m.data.shotName?.toLowerCase().includes("b-roll") ? "b-roll" : "a-roll") as "a-roll" | "b-roll",
-                        videoUrl: m.data.videoUrl,
-                        startTime: 0,
-                        duration: parseInt(m.data.duration) || 8,
-                        name: m.data.shotName || `Clip ${i + 1}`,
-                        thumbnailUrl: m.data.thumbnailUrl,
-                      }));
-                    
-                    // Recalc start times
-                    let t = 0;
-                    for (const c of videoClips) { c.startTime = t; t += c.duration; }
-
-                    // Get unified voiceover and full script
-                    const unifiedAudio = messages.find(m => m.content === "audio" && m.data?.voice?.includes("Unified") && m.data?.audioUrl);
-                    const scriptMsg = messages.find(m => m.content === "script" && m.data);
-                    const script = scriptMsg?.data
-                      ? `${scriptMsg.data.hook || ''} ${scriptMsg.data.body || ''} ${scriptMsg.data.cta || ''}`
-                      : '';
-
-                    if (videoClips.length === 0) {
+                {results.map((r) => {
+                  switch (r.result.kind) {
+                    case "script":
                       return (
-                        <p className="text-[11px] text-[#666]">
-                          No completed video clips found. Generate some videos first, then come back to compile.
-                        </p>
+                        <div key={r.id}>
+                          {/* User prompt */}
+                          <div className="flex justify-end mb-3">
+                            <div className="bg-purple/10 border border-purple/20 rounded-xl px-4 py-2.5 max-w-[400px]">
+                              <p className="text-[13px] text-white/90">
+                                {r.prompt}
+                              </p>
+                              <p className="text-[10px] text-[#555] mt-1">
+                                {r.timestamp}
+                              </p>
+                            </div>
+                          </div>
+                          <ScriptCard
+                            data={r.result.data}
+                            onGenerateImage={handleScriptGenerateImage}
+                            onGenerateVideo={handleScriptGenerateVideo}
+                            onGenerateBroll={handleScriptGenerateBroll}
+                          />
+                        </div>
                       );
-                    }
 
-                    // Auto-set timeline clips if empty
-                    if (timelineClips.length === 0 && videoClips.length > 0) {
-                      setTimeout(() => {
-                        setTimelineClips(videoClips);
-                        if (script) setFullScriptText(script);
-                        if (unifiedAudio?.data?.audioUrl) setUnifiedVoiceUrl(unifiedAudio.data.audioUrl);
-                      }, 0);
-                    }
+                    case "images":
+                      return (
+                        <div key={r.id}>
+                          <div className="flex justify-end mb-3">
+                            <div className="bg-purple/10 border border-purple/20 rounded-xl px-4 py-2.5 max-w-[400px]">
+                              <p className="text-[13px] text-white/90">
+                                {r.prompt}
+                              </p>
+                              <p className="text-[10px] text-[#555] mt-1">
+                                {r.timestamp}
+                              </p>
+                            </div>
+                          </div>
+                          {r.result.status === "generating" ? (
+                            <ResultCard
+                              type="image"
+                              title={`Generating Images — ${r.result.shotName}`}
+                              status="generating"
+                              progress={r.result.progress}
+                              step="Processing..."
+                            >
+                              <div className="px-5 pb-4">
+                                <div className="grid grid-cols-4 gap-2.5">
+                                  {[0, 1, 2, 3].map((i) => (
+                                    <div
+                                      key={i}
+                                      className="aspect-[2/3] rounded-lg bg-[#222] animate-pulse"
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            </ResultCard>
+                          ) : (
+                            <ImageCard
+                              shotName={r.result.shotName}
+                              variations={r.result.variations}
+                            />
+                          )}
+                        </div>
+                      );
 
-                    return (
-                      <div className="space-y-4">
-                        <TimelineEditor
-                          clips={timelineClips.length > 0 ? timelineClips : videoClips}
-                          onClipsChange={setTimelineClips}
-                        />
-                        <ExportPanel
-                          clips={timelineClips.length > 0 ? timelineClips : videoClips}
-                          scriptText={fullScriptText || script}
-                          voiceoverUrl={unifiedVoiceUrl || unifiedAudio?.data?.audioUrl}
-                          onCompileComplete={(url) => {
-                            setMessages((prev) => [
-                              ...prev,
-                              {
-                                id: String(Date.now()),
-                                role: "assistant",
-                                content: "video",
-                                data: {
-                                  shotName: "Final Compiled Ad",
-                                  engine: "FFmpeg",
-                                  duration: "...",
-                                  resolution: "1080x1920",
-                                  cost: "Free",
-                                  voice: "-",
-                                  status: "complete",
-                                  progress: 100,
-                                  thumbnailUrl: "",
-                                  videoUrl: url,
-                                },
-                              },
-                            ]);
-                          }}
-                        />
-                      </div>
-                    );
-                  })()}
-                </div>
-              )}
-            </div>
+                    case "video":
+                      return (
+                        <div key={r.id}>
+                          <div className="flex justify-end mb-3">
+                            <div className="bg-purple/10 border border-purple/20 rounded-xl px-4 py-2.5 max-w-[400px]">
+                              <p className="text-[13px] text-white/90">
+                                {r.prompt}
+                              </p>
+                              <p className="text-[10px] text-[#555] mt-1">
+                                {r.timestamp}
+                              </p>
+                            </div>
+                          </div>
+                          <VideoCard data={r.result.data} />
+                        </div>
+                      );
+
+                    case "broll":
+                      return (
+                        <div key={r.id}>
+                          <ResultCard
+                            type="broll"
+                            title={`B-Roll — ${r.result.shotName}`}
+                            status={r.result.status}
+                            progress={r.result.progress}
+                          >
+                            {r.result.videoUrl ? (
+                              <div className="px-5 pb-4">
+                                <video
+                                  src={r.result.videoUrl}
+                                  controls
+                                  className="w-full rounded-lg"
+                                />
+                              </div>
+                            ) : (
+                              <div className="px-5 pb-4">
+                                <div className="aspect-video rounded-lg bg-[#222] animate-pulse" />
+                              </div>
+                            )}
+                          </ResultCard>
+                        </div>
+                      );
+
+                    default:
+                      return null;
+                  }
+                })}
+              </div>
+            )}
           </div>
-        )}
 
-        {/* Prompt Bar */}
-        <div className="shrink-0 px-6 pb-4">
-          {/* Quick Actions */}
-          <div className="flex items-center gap-2 mb-2">
-            {[
-              { id: "script", icon: FileText, label: "Script" },
-              { id: "image", icon: Image, label: "Image" },
-              { id: "video", icon: Video, label: "Video" },
-              { id: "broll", icon: Play, label: "B-Roll" },
-              { id: "voice", icon: Mic, label: "Voice" },
-              { id: "unify", icon: Combine, label: "Unify Voice" },
-              { id: "edit", icon: Scissors, label: "Edit & Compile" },
-            ].map(({ id, icon: Icon, label }) => (
-              <button
-                key={id}
-                onClick={() => setActiveQuickAction(activeQuickAction === id ? null : id)}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all ${
-                  activeQuickAction === id
-                    ? "bg-[#6C5CE7]/20 text-[#6C5CE7]"
-                    : "bg-white/5 text-[#888] hover:text-white hover:bg-white/10"
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
-              </button>
-            ))}
-          </div>
-
-          {/* Input */}
-          <div className="flex items-end gap-2 bg-[#141420] border border-[#1e1e3a] rounded-xl p-2 focus-within:border-[#6C5CE7]/50 transition-colors">
-            <button className="p-2 text-[#555] hover:text-white transition-colors">
-              <Paperclip className="w-4 h-4" />
-            </button>
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Describe what you want to create..."
-              className="flex-1 bg-transparent text-[13px] text-white placeholder:text-[#555] resize-none focus:outline-none min-h-[36px] max-h-[120px] py-2"
-              rows={1}
+          {/* Prompt bar (fixed at bottom) */}
+          <div className="shrink-0 px-8 pb-6 pt-2 bg-gradient-to-t from-[#0f0f0f] via-[#0f0f0f] to-transparent">
+            {/* Show tabs inline with prompt when results exist */}
+            {results.length > 0 && (
+              <div className="mb-3 flex justify-center">
+                {/* Small tab indicator */}
+              </div>
+            )}
+            <PromptBar
+              activeTab={activeTab}
+              selectedActors={selectedActors}
+              onOpenActorGallery={() => setShowActorGallery(true)}
+              onRemoveActor={(id) =>
+                setSelectedActors((prev) => prev.filter((a) => a.id !== id))
+              }
+              onSubmit={handleSubmit}
+              isGenerating={isGenerating}
             />
-            <button
-              onClick={handleSend}
-              disabled={isGenerating}
-              className="p-2 bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 rounded-lg text-white transition-colors"
-            >
-              <Send className="w-4 h-4" />
-            </button>
           </div>
-          <p className="text-[10px] text-[#555] mt-1 text-center">
-            Est. cost per generation: Script ~$0.02 • Image ~$0.05 • Video ~$0.50 • Voice ~$0.03
-          </p>
         </div>
       </div>
+
+      {/* Actor Gallery Overlay */}
+      {showActorGallery && (
+        <ActorGallery
+          actors={actors}
+          selectedActors={selectedActors}
+          maxSelect={1}
+          onSelect={setSelectedActors}
+          onClose={() => setShowActorGallery(false)}
+          onCreateActor={() => {
+            setShowCreateActor(true);
+          }}
+        />
+      )}
+
+      {/* Create Actor Modal */}
+      {showCreateActor && (
+        <CreateActorModal
+          onClose={() => setShowCreateActor(false)}
+          onSave={(name, image) => {
+            // Add to local actors
+            if (name && image) {
+              const newActor: Actor = {
+                id: `custom-${Date.now()}`,
+                name,
+                imageUrl: URL.createObjectURL(image),
+                description: "Custom actor",
+              };
+              setActors((prev) => [...prev, newActor]);
+            }
+            setShowCreateActor(false);
+          }}
+          onGenerate={(prompt, aspectRatio, quality) => {
+            console.log("Generate actor:", { prompt, aspectRatio, quality });
+          }}
+        />
+      )}
     </div>
   );
 }

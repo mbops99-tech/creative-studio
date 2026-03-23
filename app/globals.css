@@ -11,7 +11,7 @@
 }
 
 body {
-  background: #0a0a0a;
+  background: #0f0f0f;
   color: #fff;
   font-family: 'Inter', system-ui, sans-serif;
   overflow: hidden;
@@ -25,39 +25,16 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #2a2a4a;
+  background: #2a2a2a;
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #3a3a5a;
+  background: #3a3a3a;
 }
 
 /* Smooth transitions */
 .transition-all {
   transition: all 0.2s ease;
-}
-
-/* Typing animation */
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-.cursor-blink::after {
-  content: '|';
-  animation: blink 1s infinite;
-  margin-left: 2px;
-  color: #6C5CE7;
-}
-
-/* Progress bar animation */
-@keyframes progress {
-  0% { width: 0%; }
-  100% { width: 65%; }
-}
-
-.animate-progress {
-  animation: progress 3s ease-out forwards;
 }
 
 /* Pulse animation for generating state */
@@ -68,4 +45,24 @@ body {
 
 .pulse-glow {
   animation: pulse-glow 2s infinite;
+}
+
+/* Fade in animation */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s ease forwards;
+}
+
+/* Slide up animation */
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s ease forwards;
 }
