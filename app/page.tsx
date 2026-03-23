@@ -5,77 +5,139 @@ import Sidebar from "@/components/Sidebar";
 import ScriptCard from "@/components/ScriptCard";
 import ImageCard from "@/components/ImageCard";
 import VideoCard from "@/components/VideoCard";
-import { MOCK_SCRIPT, MOCK_IMAGE_VARIATIONS, MOCK_VIDEO, type Message } from "@/lib/mock-data";
-import { Send, FileText, Image, Video, Mic, Paperclip, Sparkles } from "lucide-react";
-
-const INITIAL_MESSAGES: Message[] = [
-  {
-    id: "1",
-    role: "user",
-    content: "Create a UGC ad script for Desaire - AI girlfriend app targeting single men 18-35 who want companionship",
-  },
-  {
-    id: "2",
-    role: "assistant",
-    content: "script",
-    data: MOCK_SCRIPT,
-  },
-  {
-    id: "3",
-    role: "user",
-    content: "Generate first frame for the Hook shot",
-  },
-  {
-    id: "4",
-    role: "assistant",
-    content: "image",
-    data: { shotName: "Hook", variations: MOCK_IMAGE_VARIATIONS },
-  },
-  {
-    id: "5",
-    role: "user",
-    content: "Make her look more natural, like a real selfie, messy hair",
-  },
-  {
-    id: "6",
-    role: "assistant",
-    content: "image",
-    data: { shotName: "Hook (v2)", variations: MOCK_IMAGE_VARIATIONS.map((v, i) => ({ ...v, id: `v2-${i}`, selected: i === 1 })) },
-  },
-  {
-    id: "7",
-    role: "user",
-    content: "Perfect, use the second one. Now generate the video for the hook",
-  },
-  {
-    id: "8",
-    role: "assistant",
-    content: "video",
-    data: MOCK_VIDEO,
-  },
-];
+import { generateScript } from "@/lib/api";
+import type { Message } from "@/lib/mock-data";
+import { Send, FileText, Image, Video, Mic, Paperclip, Sparkles, Loader2 } from "lucide-react";
 
 export default function Home() {
-  const [messages, setMessages] = useState<Message[]>(INITIAL_MESSAGES);
+  const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [activeProject, setActiveProject] = useState("desaire-1");
   const [activeQuickAction, setActiveQuickAction] = useState<string | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Script form state
+  const [scriptForm, setScriptForm] = useState({
+    product: "",
+    audience: "",
+    outcome: "",
+    differentiator: "",
+    proof: "",
+    speed: "fast",
+  });
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  const handleGenerateScript = async () => {
+    if (!scriptForm.product.trim() || !scriptForm.audience.trim()) return;
+
+    // Add user message
+    const userMsg: Message = {
+      id: String(Date.now()),
+      role: "user",
+      content: `Generate a UGC ad script for ${scriptForm.product} targeting ${scriptForm.audience}`,
+    };
+
+    // Add loading message
+    const loadingMsg: Message = {
+      id: String(Date.now() + 1),
+      role: "assistant",
+      content: "loading",
+    };
+
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setActiveQuickAction(null);
+    setIsGenerating(true);
+
+    try {
+      const scriptData = await generateScript(scriptForm);
+
+      // Replace loading message with script card
+      setMessages((prev) => {
+        const withoutLoading = prev.filter((m) => m.id !== loadingMsg.id);
+        return [
+          ...withoutLoading,
+          {
+            id: String(Date.now() + 2),
+            role: "assistant" as const,
+            content: "script",
+            data: scriptData,
+          },
+        ];
+      });
+
+      // Reset form
+      setScriptForm({
+        product: "",
+        audience: "",
+        outcome: "",
+        differentiator: "",
+        proof: "",
+        speed: "fast",
+      });
+    } catch (err) {
+      // Replace loading with error
+      setMessages((prev) => {
+        const withoutLoading = prev.filter((m) => m.id !== loadingMsg.id);
+        return [
+          ...withoutLoading,
+          {
+            id: String(Date.now() + 2),
+            role: "assistant" as const,
+            content: `Error generating script: ${err instanceof Error ? err.message : "Unknown error"}`,
+          },
+        ];
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleSend = async () => {
+    if (!input.trim() || isGenerating) return;
+    const userInput = input.trim();
     const newMsg: Message = {
       id: String(Date.now()),
       role: "user",
-      content: input,
+      content: userInput,
     };
-    setMessages([...messages, newMsg]);
+    setMessages((prev) => [...prev, newMsg]);
     setInput("");
     setActiveQuickAction(null);
+
+    // Detect if it looks like a script request
+    const scriptKeywords = ["script", "ad", "ugc", "create", "generate", "write"];
+    const isScriptRequest = scriptKeywords.some((kw) =>
+      userInput.toLowerCase().includes(kw)
+    );
+
+    if (isScriptRequest && messages.length === 0) {
+      // First message that looks like a script request — suggest using the panel
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: String(Date.now() + 1),
+          role: "assistant",
+          content:
+            "I can generate a script for you! Use the Script quick action below to fill in the details, or tell me more about your product and I'll help you get started.",
+        },
+      ]);
+      setActiveQuickAction("script");
+    } else {
+      // Regular message — echo for now (AI chat integration can come later)
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: String(Date.now() + 1),
+          role: "assistant",
+          content:
+            "Got it! Use the quick action buttons below to generate scripts, images, videos, or voiceovers. For scripts, click the Script button and fill in your product details.",
+        },
+      ]);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -96,13 +158,28 @@ export default function Home() {
         <div className="h-12 border-b border-[#1e1e3a] flex items-center px-5 shrink-0">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-[#6C5CE7]" />
-            <span className="text-sm font-semibold">Desaire Ad Campaign</span>
-            <span className="text-[11px] text-[#888] bg-white/5 px-2 py-0.5 rounded">8 shots</span>
+            <span className="text-sm font-semibold">Creative Studio</span>
           </div>
         </div>
 
         {/* Chat Area */}
         <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+          {messages.length === 0 && (
+            <div className="flex items-center justify-center h-full">
+              <div className="text-center space-y-3 max-w-md">
+                <div className="w-12 h-12 rounded-2xl bg-[#6C5CE7]/20 flex items-center justify-center mx-auto">
+                  <Sparkles className="w-6 h-6 text-[#6C5CE7]" />
+                </div>
+                <h2 className="text-lg font-semibold text-white/90">Creative Studio</h2>
+                <p className="text-[13px] text-[#888] leading-relaxed">
+                  Generate ad scripts, images, videos and voiceovers — all powered by AI.
+                  <br />
+                  Click <span className="text-[#6C5CE7] font-medium">Script</span> below to get started.
+                </p>
+              </div>
+            </div>
+          )}
+
           {messages.map((msg) => (
             <div key={msg.id}>
               {msg.role === "user" ? (
@@ -114,6 +191,12 @@ export default function Home() {
               ) : (
                 <div className="flex justify-start">
                   <div className="max-w-[85%] space-y-2">
+                    {msg.content === "loading" && (
+                      <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-2">
+                        <Loader2 className="w-4 h-4 text-[#6C5CE7] animate-spin" />
+                        <p className="text-[13px] text-white/60">Generating script...</p>
+                      </div>
+                    )}
                     {msg.content === "script" && msg.data && (
                       <ScriptCard data={msg.data} />
                     )}
@@ -123,11 +206,14 @@ export default function Home() {
                     {msg.content === "video" && msg.data && (
                       <VideoCard data={msg.data} />
                     )}
-                    {msg.content !== "script" && msg.content !== "image" && msg.content !== "video" && (
-                      <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3">
-                        <p className="text-[13px] text-white/80">{msg.content}</p>
-                      </div>
-                    )}
+                    {msg.content !== "script" &&
+                      msg.content !== "image" &&
+                      msg.content !== "video" &&
+                      msg.content !== "loading" && (
+                        <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3">
+                          <p className="text-[13px] text-white/80">{msg.content}</p>
+                        </div>
+                      )}
                   </div>
                 </div>
               )}
@@ -143,16 +229,59 @@ export default function Home() {
               {activeQuickAction === "script" && (
                 <div className="space-y-3">
                   <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Script</p>
-                  <input
-                    className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
-                    placeholder="Product name or description..."
-                  />
-                  <input
-                    className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
-                    placeholder="Target audience..."
-                  />
-                  <button className="bg-[#6C5CE7] hover:bg-[#5A4BD1] text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors">
-                    Generate Script ~$0.02
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
+                      placeholder="Product name or description..."
+                      value={scriptForm.product}
+                      onChange={(e) => setScriptForm({ ...scriptForm, product: e.target.value })}
+                    />
+                    <input
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
+                      placeholder="Target audience..."
+                      value={scriptForm.audience}
+                      onChange={(e) => setScriptForm({ ...scriptForm, audience: e.target.value })}
+                    />
+                    <input
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
+                      placeholder="Desired outcome (e.g. app downloads)..."
+                      value={scriptForm.outcome}
+                      onChange={(e) => setScriptForm({ ...scriptForm, outcome: e.target.value })}
+                    />
+                    <input
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
+                      placeholder="Key differentiator..."
+                      value={scriptForm.differentiator}
+                      onChange={(e) => setScriptForm({ ...scriptForm, differentiator: e.target.value })}
+                    />
+                    <input
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none"
+                      placeholder="Social proof (e.g. 100k+ users)..."
+                      value={scriptForm.proof}
+                      onChange={(e) => setScriptForm({ ...scriptForm, proof: e.target.value })}
+                    />
+                    <select
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white focus:border-[#6C5CE7] focus:outline-none"
+                      value={scriptForm.speed}
+                      onChange={(e) => setScriptForm({ ...scriptForm, speed: e.target.value })}
+                    >
+                      <option value="fast">Fast (~10s)</option>
+                      <option value="quality">Quality (~30s)</option>
+                    </select>
+                  </div>
+                  <button
+                    onClick={handleGenerateScript}
+                    disabled={isGenerating || !scriptForm.product.trim() || !scriptForm.audience.trim()}
+                    className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+                  >
+                    {isGenerating ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Generating...
+                      </>
+                    ) : (
+                      "Generate Script ~$0.02"
+                    )}
                   </button>
                 </div>
               )}
@@ -266,7 +395,8 @@ export default function Home() {
             />
             <button
               onClick={handleSend}
-              className="p-2 bg-[#6C5CE7] hover:bg-[#5A4BD1] rounded-lg text-white transition-colors"
+              disabled={isGenerating}
+              className="p-2 bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 rounded-lg text-white transition-colors"
             >
               <Send className="w-4 h-4" />
             </button>
