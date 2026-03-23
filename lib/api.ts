@@ -206,3 +206,68 @@ export async function getActors(): Promise<Actor[]> {
     imageUrl: a.imageUrl.startsWith("http") ? a.imageUrl : `${API_BASE}${a.imageUrl}`,
   }));
 }
+
+// --- Video Generation API ---
+
+export interface VideoJobStatus {
+  status: "pending" | "processing" | "complete" | "failed";
+  progress: number;
+  step?: string;
+  videoUrl?: string;
+  duration?: string;
+  engine?: string;
+  error?: string;
+}
+
+export interface VoicePreset {
+  id: string;
+  name: string;
+  msVoice: string;
+}
+
+export async function generateVideo(
+  imageUrl: string,
+  script: string,
+  action?: string,
+  voice?: string,
+  mode?: "easy" | "custom",
+  engine?: "sadtalker" | "kling"
+): Promise<string> {
+  const data = await apiFetch("/api/video/generate", {
+    imageUrl,
+    script,
+    action,
+    voice: voice || "aria",
+    mode: mode || "easy",
+    engine: engine || "sadtalker",
+  });
+  return data.jobId;
+}
+
+export async function checkVideoStatus(jobId: string): Promise<VideoJobStatus> {
+  const data = await apiGet(`/api/video/status/${jobId}`);
+  if (data.videoUrl && !data.videoUrl.startsWith("http")) {
+    data.videoUrl = `${API_BASE}${data.videoUrl}`;
+  }
+  return data;
+}
+
+export async function generateVoice(
+  text: string,
+  voice?: string
+): Promise<{ audioUrl: string; audioId: string; voice: string }> {
+  const data = await apiFetch("/api/voice/generate", {
+    text,
+    voice: voice || "aria",
+  });
+  return {
+    audioUrl: data.audioUrl.startsWith("http") ? data.audioUrl : `${API_BASE}${data.audioUrl}`,
+    audioId: data.audioId,
+    voice: data.voice,
+  };
+}
+
+export async function getVoices(): Promise<VoicePreset[]> {
+  const data = await apiGet("/api/voices");
+  return data.voices;
+}

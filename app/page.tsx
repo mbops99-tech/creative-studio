@@ -5,8 +5,8 @@ import Sidebar from "@/components/Sidebar";
 import ScriptCard from "@/components/ScriptCard";
 import ImageCard from "@/components/ImageCard";
 import VideoCard from "@/components/VideoCard";
-import { generateScript, generateImages, checkImageStatus, editImage, getActors } from "@/lib/api";
-import type { Actor } from "@/lib/api";
+import { generateScript, generateImages, checkImageStatus, editImage, getActors, generateVideo, checkVideoStatus, generateVoice, getVoices } from "@/lib/api";
+import type { Actor, VoicePreset } from "@/lib/api";
 import type { Message } from "@/lib/mock-data";
 import { Send, FileText, Image, Video, Mic, Paperclip, Sparkles, Loader2 } from "lucide-react";
 
@@ -34,9 +34,25 @@ export default function Home() {
   const [actors, setActors] = useState<Actor[]>([]);
   const [isGeneratingImage, setIsGeneratingImage] = useState(false);
 
-  // Load actors on mount
+  // Video form state
+  const [videoScript, setVideoScript] = useState("");
+  const [videoImageUrl, setVideoImageUrl] = useState("");
+  const [videoAction, setVideoAction] = useState("");
+  const [videoVoice, setVideoVoice] = useState("aria");
+  const [videoEngine, setVideoEngine] = useState<"sadtalker" | "kling">("sadtalker");
+  const [videoMode, setVideoMode] = useState<"easy" | "custom">("easy");
+  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
+  const [voices, setVoices] = useState<VoicePreset[]>([]);
+
+  // Voice form state
+  const [voiceText, setVoiceText] = useState("");
+  const [voiceSelected, setVoiceSelected] = useState("aria");
+  const [isGeneratingVoice, setIsGeneratingVoice] = useState(false);
+
+  // Load actors and voices on mount
   useEffect(() => {
     getActors().then(setActors).catch(console.error);
+    getVoices().then(setVoices).catch(console.error);
   }, []);
 
   useEffect(() => {
@@ -183,6 +199,232 @@ export default function Home() {
     setActiveQuickAction("image");
     // Auto-generate with the action as prompt
     handleGenerateImage(action, shotName);
+  };
+
+  // Called from ScriptCard shotlist "Video" button
+  const handleShotVideoGenerate = (shotName: string, script: string, action: string) => {
+    setVideoScript(script);
+    setVideoAction(action);
+    setActiveQuickAction("video");
+  };
+
+  // Poll for video generation status
+  const pollVideoStatus = useCallback(async (jobId: string, loadingMsgId: string, shotName: string) => {
+    const poll = async () => {
+      try {
+        const status = await checkVideoStatus(jobId);
+        if (status.status === "processing") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === loadingMsgId
+                ? {
+                    ...m,
+                    content: "video",
+                    data: {
+                      shotName,
+                      engine: status.engine || videoEngine === "sadtalker" ? "SadTalker (Free)" : "Kling 2.5",
+                      duration: status.duration || "...",
+                      resolution: "512x768",
+                      cost: videoEngine === "sadtalker" ? "Free" : "$0.50",
+                      voice: videoVoice,
+                      status: "generating",
+                      progress: status.progress || 0,
+                      step: status.step,
+                      thumbnailUrl: "",
+                    },
+                  }
+                : m
+            )
+          );
+          setTimeout(poll, 3000);
+        } else if (status.status === "complete") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === loadingMsgId
+                ? {
+                    ...m,
+                    content: "video",
+                    data: {
+                      shotName,
+                      engine: status.engine || "SadTalker",
+                      duration: status.duration || "0s",
+                      resolution: "512x768",
+                      cost: videoEngine === "sadtalker" ? "Free" : "$0.50",
+                      voice: videoVoice,
+                      status: "complete",
+                      progress: 100,
+                      thumbnailUrl: "",
+                      videoUrl: status.videoUrl,
+                    },
+                  }
+                : m
+            )
+          );
+          setIsGeneratingVideo(false);
+        } else if (status.status === "failed") {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === loadingMsgId
+                ? {
+                    ...m,
+                    content: `Video generation failed: ${status.error || "Unknown error"}`,
+                    data: undefined,
+                  }
+                : m
+            )
+          );
+          setIsGeneratingVideo(false);
+        } else {
+          setTimeout(poll, 3000);
+        }
+      } catch (err) {
+        console.error("Video poll error:", err);
+        setTimeout(poll, 5000);
+      }
+    };
+    setTimeout(poll, 3000);
+  }, [videoEngine, videoVoice]);
+
+  const handleGenerateVideo = async () => {
+    if (!videoScript.trim()) return;
+    
+    // Need an image URL - use a placeholder or the last generated image
+    let imageUrl = videoImageUrl;
+    if (!imageUrl) {
+      // Try to find the last generated image from messages
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i];
+        if (msg.content === "image" && msg.data?.variations?.length > 0) {
+          const selected = msg.data.variations.find((v: { selected?: boolean }) => v.selected);
+          imageUrl = selected?.url || msg.data.variations[0].url;
+          break;
+        }
+      }
+    }
+
+    if (!imageUrl) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: String(Date.now()),
+          role: "assistant" as const,
+          content: "Please generate or provide an image first — I need a source image for the talking head video. Enter an image URL in the Image URL field or generate one using the Image action.",
+        },
+      ]);
+      return;
+    }
+
+    const userMsg: Message = {
+      id: String(Date.now()),
+      role: "user",
+      content: `Generate talking head video: "${videoScript.slice(0, 80)}..."`,
+    };
+
+    const loadingMsgId = String(Date.now() + 1);
+    const loadingMsg: Message = {
+      id: loadingMsgId,
+      role: "assistant",
+      content: "video",
+      data: {
+        shotName: "Video",
+        engine: videoEngine === "sadtalker" ? "SadTalker (Free)" : "Kling 2.5",
+        duration: "...",
+        resolution: "512x768",
+        cost: videoEngine === "sadtalker" ? "Free" : "$0.50",
+        voice: videoVoice,
+        status: "generating",
+        progress: 0,
+        step: "Starting...",
+        thumbnailUrl: "",
+      },
+    };
+
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setActiveQuickAction(null);
+    setIsGeneratingVideo(true);
+
+    try {
+      const jobId = await generateVideo(
+        imageUrl,
+        videoScript,
+        videoAction || undefined,
+        videoVoice,
+        videoMode,
+        videoEngine
+      );
+      pollVideoStatus(jobId, loadingMsgId, "Video");
+    } catch (err) {
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === loadingMsgId
+            ? {
+                ...m,
+                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
+                data: undefined,
+              }
+            : m
+        )
+      );
+      setIsGeneratingVideo(false);
+    }
+  };
+
+  const handleGenerateVoice = async () => {
+    if (!voiceText.trim()) return;
+
+    const userMsg: Message = {
+      id: String(Date.now()),
+      role: "user",
+      content: `Generate voiceover: "${voiceText.slice(0, 60)}..."`,
+    };
+
+    const loadingMsgId = String(Date.now() + 1);
+    const loadingMsg: Message = {
+      id: loadingMsgId,
+      role: "assistant",
+      content: "loading",
+    };
+
+    setMessages((prev) => [...prev, userMsg, loadingMsg]);
+    setActiveQuickAction(null);
+    setIsGeneratingVoice(true);
+
+    try {
+      const result = await generateVoice(voiceText, voiceSelected);
+
+      setMessages((prev) => {
+        const withoutLoading = prev.filter((m) => m.id !== loadingMsgId);
+        return [
+          ...withoutLoading,
+          {
+            id: String(Date.now() + 2),
+            role: "assistant" as const,
+            content: "audio",
+            data: {
+              audioUrl: result.audioUrl,
+              voice: result.voice,
+              text: voiceText,
+            },
+          },
+        ];
+      });
+
+      setVoiceText("");
+    } catch (err) {
+      setMessages((prev) => {
+        const withoutLoading = prev.filter((m) => m.id !== loadingMsgId);
+        return [
+          ...withoutLoading,
+          {
+            id: String(Date.now() + 2),
+            role: "assistant" as const,
+            content: `Voice error: ${err instanceof Error ? err.message : "Unknown error"}`,
+          },
+        ];
+      });
+    } finally {
+      setIsGeneratingVoice(false);
+    }
   };
 
   const handleGenerateScript = async () => {
@@ -362,7 +604,7 @@ export default function Home() {
                       </div>
                     )}
                     {msg.content === "script" && msg.data && (
-                      <ScriptCard data={msg.data} onGenerateImage={handleShotImageGenerate} />
+                      <ScriptCard data={msg.data} onGenerateImage={handleShotImageGenerate} onGenerateVideo={handleShotVideoGenerate} />
                     )}
                     {msg.content === "image" && msg.data && (
                       <ImageCard
@@ -374,9 +616,23 @@ export default function Home() {
                     {msg.content === "video" && msg.data && (
                       <VideoCard data={msg.data} />
                     )}
+                    {msg.content === "audio" && msg.data && (
+                      <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3 space-y-2">
+                        <div className="flex items-center gap-2">
+                          <Mic className="w-4 h-4 text-emerald-400" />
+                          <span className="text-[13px] text-white font-medium">Voiceover Generated</span>
+                        </div>
+                        <p className="text-[11px] text-muted">&ldquo;{msg.data.text}&rdquo;</p>
+                        <audio controls className="w-full h-8 mt-1" src={msg.data.audioUrl}>
+                          Your browser does not support audio.
+                        </audio>
+                        <p className="text-[10px] text-muted">Voice: {msg.data.voice}</p>
+                      </div>
+                    )}
                     {msg.content !== "script" &&
                       msg.content !== "image" &&
                       msg.content !== "video" &&
+                      msg.content !== "audio" &&
                       msg.content !== "loading" &&
                       msg.content !== "image-loading" && (
                         <div className="bg-[#141420] border border-[#1e1e3a] rounded-2xl rounded-bl-md px-4 py-3">
@@ -512,44 +768,126 @@ export default function Home() {
               )}
               {activeQuickAction === "video" && (
                 <div className="space-y-3">
-                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Video</p>
+                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Talking Head Video</p>
                   <div className="flex gap-3">
-                    <button className="text-[12px] px-3 py-1.5 rounded-lg bg-[#6C5CE7]/20 text-[#6C5CE7] font-medium">Easy Mode</button>
-                    <button className="text-[12px] px-3 py-1.5 rounded-lg bg-white/5 text-[#888] hover:text-white transition-colors">Custom Mode</button>
+                    <button
+                      onClick={() => setVideoMode("easy")}
+                      className={`text-[12px] px-3 py-1.5 rounded-lg font-medium transition-colors ${videoMode === "easy" ? "bg-[#6C5CE7]/20 text-[#6C5CE7]" : "bg-white/5 text-[#888] hover:text-white"}`}
+                    >
+                      Easy Mode
+                    </button>
+                    <button
+                      onClick={() => setVideoMode("custom")}
+                      className={`text-[12px] px-3 py-1.5 rounded-lg font-medium transition-colors ${videoMode === "custom" ? "bg-[#6C5CE7]/20 text-[#6C5CE7]" : "bg-white/5 text-[#888] hover:text-white"}`}
+                    >
+                      Custom Mode
+                    </button>
                   </div>
-                  <textarea
-                    className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-16"
-                    placeholder="Action description..."
-                  />
-                  <div className="flex gap-2 items-center">
-                    <select className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none">
-                      <option>Kling 2.5 (Best)</option>
-                      <option>Fast (Free)</option>
+                  <div className="grid grid-cols-2 gap-3">
+                    <input
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none col-span-2"
+                      placeholder="Image URL (or leave empty to use last generated image)..."
+                      value={videoImageUrl}
+                      onChange={(e) => setVideoImageUrl(e.target.value)}
+                    />
+                    <textarea
+                      className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-16 col-span-2"
+                      placeholder="Script text (what the person says)..."
+                      value={videoScript}
+                      onChange={(e) => setVideoScript(e.target.value)}
+                    />
+                    {videoMode === "custom" && (
+                      <textarea
+                        className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-12 col-span-2"
+                        placeholder="Action description (optional)..."
+                        value={videoAction}
+                        onChange={(e) => setVideoAction(e.target.value)}
+                      />
+                    )}
+                  </div>
+                  <div className="flex gap-2 items-center flex-wrap">
+                    <select
+                      className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none"
+                      value={videoEngine}
+                      onChange={(e) => setVideoEngine(e.target.value as "sadtalker" | "kling")}
+                    >
+                      <option value="sadtalker">SadTalker (Free)</option>
+                      <option value="kling">Kling 2.5 ($0.50)</option>
                     </select>
-                    <button className="bg-[#6C5CE7] hover:bg-[#5A4BD1] text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors">
-                      Generate Video ~$0.50
+                    <select
+                      className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none"
+                      value={videoVoice}
+                      onChange={(e) => setVideoVoice(e.target.value)}
+                    >
+                      {voices.length > 0
+                        ? voices.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.name}
+                            </option>
+                          ))
+                        : ["Aria", "Jenny", "Guy", "Sara", "Tony", "Emma", "Brian"].map((name) => (
+                            <option key={name.toLowerCase()} value={name.toLowerCase()}>
+                              {name}
+                            </option>
+                          ))}
+                    </select>
+                    <button
+                      onClick={handleGenerateVideo}
+                      disabled={isGeneratingVideo || !videoScript.trim()}
+                      className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+                    >
+                      {isGeneratingVideo ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        `Generate Video ${videoEngine === "sadtalker" ? "(Free)" : "~$0.50"}`
+                      )}
                     </button>
                   </div>
                 </div>
               )}
               {activeQuickAction === "voice" && (
                 <div className="space-y-3">
-                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Voice</p>
+                  <p className="text-[11px] text-[#888] uppercase tracking-wider font-medium">Generate Voiceover (TTS)</p>
                   <textarea
                     className="w-full bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-2 text-[13px] text-white placeholder:text-[#555] focus:border-[#6C5CE7] focus:outline-none resize-none h-16"
                     placeholder="Text to speak..."
+                    value={voiceText}
+                    onChange={(e) => setVoiceText(e.target.value)}
                   />
                   <div className="flex gap-2 items-center">
-                    <select className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none">
-                      <option>Bella - Warm</option>
-                      <option>Rachel - Casual</option>
-                      <option>Josh - Confident</option>
-                      <option>Vanessa - Energetic</option>
+                    <select
+                      className="bg-white/5 border border-[#1e1e3a] rounded-lg px-3 py-1.5 text-[12px] text-white focus:outline-none"
+                      value={voiceSelected}
+                      onChange={(e) => setVoiceSelected(e.target.value)}
+                    >
+                      {voices.length > 0
+                        ? voices.map((v) => (
+                            <option key={v.id} value={v.id}>
+                              {v.name}
+                            </option>
+                          ))
+                        : ["Aria", "Jenny", "Guy", "Sara", "Tony", "Emma", "Brian"].map((name) => (
+                            <option key={name.toLowerCase()} value={name.toLowerCase()}>
+                              {name}
+                            </option>
+                          ))}
                     </select>
-                    <input type="range" min="0.8" max="1.3" step="0.05" defaultValue="1.0" className="flex-1 accent-[#6C5CE7]" />
-                    <span className="text-[11px] text-[#888]">1.0x</span>
-                    <button className="bg-[#6C5CE7] hover:bg-[#5A4BD1] text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors">
-                      Generate ~$0.03
+                    <button
+                      onClick={handleGenerateVoice}
+                      disabled={isGeneratingVoice || !voiceText.trim()}
+                      className="bg-[#6C5CE7] hover:bg-[#5A4BD1] disabled:opacity-50 disabled:cursor-not-allowed text-white text-[12px] font-medium px-4 py-2 rounded-lg transition-colors inline-flex items-center gap-2"
+                    >
+                      {isGeneratingVoice ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          Generating...
+                        </>
+                      ) : (
+                        "Generate Voice (Free)"
+                      )}
                     </button>
                   </div>
                 </div>

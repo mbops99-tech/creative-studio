@@ -43,6 +43,8 @@ export interface VideoData {
   status: "generating" | "complete";
   progress?: number;
   thumbnailUrl: string;
+  videoUrl?: string;
+  step?: string;
 }
 
 export interface AudioData {
