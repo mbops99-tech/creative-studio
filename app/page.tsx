@@ -79,6 +79,7 @@ export default function HomePage() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [results, setResults] = useState<Result[]>([]);
   const [credits, setCredits] = useState(50);
+  const [externalPrompt, setExternalPrompt] = useState<string | undefined>();
   const resultsRef = useRef<HTMLDivElement>(null);
 
   // Fetch actors on mount
@@ -291,6 +292,7 @@ export default function HomePage() {
           differentiator: sf.differentiator || "Unique value",
           proof: sf.proof || "Social proof",
           speed: sf.speed || "normal",
+          category: sf.category || "auto",
         });
         setResults((prev) => [
           ...prev,
@@ -396,89 +398,25 @@ export default function HomePage() {
     }
   };
 
-  // Script card actions
+  // Script card actions — switch tab and pre-fill prompt
   const handleScriptGenerateImage = async (
     shotName: string,
     action: string
   ) => {
-    setIsGenerating(true);
-    const resultId = `r-${Date.now()}`;
-    const now = new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    try {
-      const jobId = await generateImages(action, undefined, selectedActors[0]?.id, 4);
-      setResults((prev) => [
-        ...prev,
-        {
-          id: resultId,
-          timestamp: now,
-          prompt: `Image for ${shotName}: ${action}`,
-          result: {
-            kind: "images",
-            shotName,
-            variations: [],
-            status: "generating",
-            progress: 0,
-            jobId,
-          },
-        },
-      ]);
-      pollImageStatus(jobId, resultId);
-    } catch {
-      setIsGenerating(false);
-    }
+    setActiveTab("image");
+    setExternalPrompt(`${shotName}: ${action}`);
   };
 
   const handleScriptGenerateVideo = async (
     shotName: string,
     script: string,
-    action: string
+    _action: string
   ) => {
     if (!selectedActors[0]) {
       setShowActorGallery(true);
-      return;
     }
-    setIsGenerating(true);
-    const resultId = `r-${Date.now()}`;
-    const now = new Date().toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-    try {
-      const jobId = await generateVideo(
-        selectedActors[0].imageUrl,
-        script,
-        action
-      );
-      setResults((prev) => [
-        ...prev,
-        {
-          id: resultId,
-          timestamp: now,
-          prompt: `Video for ${shotName}`,
-          result: {
-            kind: "video",
-            data: {
-              shotName,
-              engine: "SadTalker",
-              duration: "10s",
-              resolution: "1080x1920",
-              cost: "$5.00",
-              voice: "aria",
-              status: "generating",
-              progress: 0,
-              thumbnailUrl: selectedActors[0].imageUrl,
-            },
-            jobId,
-          },
-        },
-      ]);
-      pollVideoStatus(jobId, resultId);
-    } catch {
-      setIsGenerating(false);
-    }
+    setActiveTab("talking-avatar");
+    setExternalPrompt(script);
   };
 
   const handleScriptGenerateBroll = async (
@@ -538,7 +476,7 @@ export default function HomePage() {
           {/* Results / scrollable area */}
           <div
             ref={resultsRef}
-            className="flex-1 overflow-y-auto px-8 py-6"
+            className="flex-1 overflow-y-auto px-8 py-6 pb-[200px]"
           >
             {/* Welcome message (show when no results) */}
             {results.length === 0 && (
@@ -554,7 +492,7 @@ export default function HomePage() {
 
             {/* Results */}
             {results.length > 0 && (
-              <div className="max-w-[800px] mx-auto space-y-4">
+              <div className="max-w-[800px] mx-auto space-y-6">
                 {/* Mode tabs (sticky-ish at top) */}
                 <div className="mb-6">
                   <ModeTabs activeTab={activeTab} onTabChange={setActiveTab} />
@@ -567,10 +505,36 @@ export default function HomePage() {
                 )}
 
                 {isGenerating && (
-                  <div className="mx-auto max-w-[680px] mb-4 p-4 bg-purple/10 border border-purple/20 rounded-xl text-purple text-sm flex items-center gap-3">
-                    <div className="w-4 h-4 border-2 border-purple border-t-transparent rounded-full animate-spin" />
-                    Generating... This may take 10-30 seconds.
-                  </div>
+                  <>
+                    <div className="mx-auto max-w-[680px] mb-4 p-5 bg-purple/10 border border-purple/30 rounded-xl text-purple text-sm flex items-center gap-3 animate-pulse">
+                      <div className="w-5 h-5 border-2 border-purple border-t-transparent rounded-full animate-spin shrink-0" />
+                      <div>
+                        <p className="font-medium">Generating your script...</p>
+                        <p className="text-purple/60 text-xs mt-0.5">This may take 10-30 seconds</p>
+                      </div>
+                    </div>
+                    {/* Skeleton loader card */}
+                    <div className="bg-card border border-card-border rounded-xl overflow-hidden animate-pulse">
+                      <div className="px-5 py-4 flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-lg bg-white/5" />
+                        <div className="flex-1 space-y-2">
+                          <div className="h-3 bg-white/5 rounded w-48" />
+                          <div className="h-2 bg-white/5 rounded w-32" />
+                        </div>
+                      </div>
+                      <div className="px-5 pb-4 space-y-3">
+                        <div className="h-2 bg-white/5 rounded w-full" />
+                        <div className="h-2 bg-white/5 rounded w-5/6" />
+                        <div className="h-2 bg-white/5 rounded w-4/6" />
+                        <div className="h-2 bg-white/5 rounded w-full" />
+                        <div className="h-2 bg-white/5 rounded w-3/6" />
+                      </div>
+                      <div className="px-5 py-3 border-t border-card-border flex gap-2">
+                        <div className="h-7 bg-white/5 rounded-lg w-28" />
+                        <div className="h-7 bg-white/5 rounded-lg w-24" />
+                      </div>
+                    </div>
+                  </>
                 )}
 
                 {results.map((r) => {
@@ -691,7 +655,7 @@ export default function HomePage() {
           </div>
 
           {/* Prompt bar (fixed at bottom) */}
-          <div className="shrink-0 px-8 pb-6 pt-2 bg-gradient-to-t from-[#0f0f0f] via-[#0f0f0f] to-transparent">
+          <div className="shrink-0 px-8 pb-6 pt-4 bg-gradient-to-t from-[#0f0f0f] via-[#0f0f0f]/98 to-[#0f0f0f]/90 backdrop-blur-sm border-t border-white/[0.03]">
             {/* Show tabs inline with prompt when results exist */}
             {results.length > 0 && (
               <div className="mb-3 flex justify-center">
@@ -707,6 +671,8 @@ export default function HomePage() {
               }
               onSubmit={handleSubmit}
               isGenerating={isGenerating}
+              externalPrompt={externalPrompt}
+              onExternalPromptConsumed={() => setExternalPrompt(undefined)}
             />
           </div>
         </div>

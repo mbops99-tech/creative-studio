@@ -99,6 +99,7 @@ export async function generateScript(params: {
   differentiator: string;
   proof: string;
   speed: string;
+  category?: string;
 }): Promise<ScriptData> {
   const data: ApiScriptResponse = await apiFetch("/api/script/generate", params);
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import {
   ChevronDown,
   Sparkles,
@@ -80,6 +80,8 @@ interface PromptBarProps {
   onRemoveActor: (actorId: string) => void;
   onSubmit: (prompt: string, model: string, quantity: number, settings: PromptSettings) => void;
   isGenerating: boolean;
+  externalPrompt?: string;
+  onExternalPromptConsumed?: () => void;
 }
 
 export interface PromptSettings {
@@ -99,6 +101,7 @@ export interface PromptSettings {
     differentiator: string;
     proof: string;
     speed: string;
+    category: string;
   };
   audioSource?: {
     type: string;
@@ -115,8 +118,20 @@ export default function PromptBar({
   onRemoveActor,
   onSubmit,
   isGenerating,
+  externalPrompt,
+  onExternalPromptConsumed,
 }: PromptBarProps) {
   const [prompt, setPrompt] = useState("");
+
+  // Accept external prompt (e.g., from ScriptCard flow)
+  useEffect(() => {
+    if (externalPrompt) {
+      setPrompt(externalPrompt);
+      onExternalPromptConsumed?.();
+      // Focus the textarea
+      setTimeout(() => textareaRef.current?.focus(), 100);
+    }
+  }, [externalPrompt, onExternalPromptConsumed]);
 
   // Avatar models
   const [avatarModel, setAvatarModel] = useState<Model>(AVATAR_MODELS[0]);
@@ -156,6 +171,7 @@ export default function PromptBar({
     differentiator: "",
     proof: "",
     speed: "",
+    category: "auto",
   });
   const [showScriptFields, setShowScriptFields] = useState(false);
 
@@ -223,6 +239,21 @@ export default function PromptBar({
     }
   };
 
+  // Category labels for display
+  const categoryLabels: Record<string, string> = {
+    auto: "🎯 Auto",
+    "ai-companion": "🤖 AI",
+    ecommerce: "🛍️ Ecom",
+    saas: "💻 SaaS",
+    fitness: "💪 Fitness",
+    beauty: "✨ Beauty",
+    finance: "💰 Finance",
+    food: "🍕 Food",
+    course: "📚 Course",
+    gaming: "🎮 Gaming",
+    home: "🏠 Home",
+  };
+
   // --- SCRIPT TAB: minimal toolbar ---
   const renderScriptToolbar = () => (
     <div className="px-3 pb-3 flex items-center justify-between">
@@ -231,6 +262,19 @@ export default function PromptBar({
           <Sparkles className="w-3.5 h-3.5 text-purple" />
           Claude
         </div>
+        <div className="w-px h-5 bg-[#2a2a2a] mx-0.5" />
+        <select
+          value={scriptFields.category}
+          onChange={(e) =>
+            setScriptFields((prev) => ({ ...prev, category: e.target.value }))
+          }
+          className="px-2.5 py-1.5 rounded-lg bg-[#222] text-[12px] text-[#888] hover:text-white border-none focus:outline-none cursor-pointer appearance-none transition-colors"
+          style={{ backgroundImage: 'none' }}
+        >
+          {Object.entries(categoryLabels).map(([val, label]) => (
+            <option key={val} value={val}>{label}</option>
+          ))}
+        </select>
       </div>
       <div className="flex items-center gap-3">
         <GenerateButton
@@ -239,6 +283,7 @@ export default function PromptBar({
           free
           onClick={handleSubmit}
           disabled={(!prompt.trim() && !scriptFields.product) || isGenerating}
+          isGenerating={isGenerating}
         />
       </div>
     </div>
@@ -335,6 +380,7 @@ export default function PromptBar({
           free={selectedModel.free}
           onClick={handleSubmit}
           disabled={!prompt.trim() || isGenerating}
+          isGenerating={isGenerating}
         />
       </div>
     </div>
@@ -426,6 +472,7 @@ export default function PromptBar({
           free={selectedModel.free}
           onClick={handleSubmit}
           disabled={!prompt.trim() || isGenerating}
+          isGenerating={isGenerating}
         />
       </div>
     </div>
@@ -447,6 +494,7 @@ export default function PromptBar({
           free
           onClick={handleSubmit}
           disabled={!prompt.trim() || isGenerating}
+          isGenerating={isGenerating}
         />
       </div>
     </div>
@@ -603,6 +651,31 @@ export default function PromptBar({
                 </button>
                 {showScriptFields && (
                   <div className="mt-3 space-y-3 animate-fade-in">
+                    {/* Category selector */}
+                    <div>
+                      <label className="text-[11px] text-[#888] font-medium mb-1 block">
+                        Category
+                      </label>
+                      <select
+                        value={scriptFields.category}
+                        onChange={(e) =>
+                          setScriptFields((prev) => ({ ...prev, category: e.target.value }))
+                        }
+                        className="w-full bg-[#0f0f0f] border border-[#2a2a2a] focus:border-purple rounded-lg px-3 py-2 text-[12px] text-white focus:outline-none transition-colors appearance-none cursor-pointer"
+                      >
+                        <option value="auto">🎯 Auto-detect</option>
+                        <option value="ai-companion">🤖 AI / Companion</option>
+                        <option value="ecommerce">🛍️ Ecommerce</option>
+                        <option value="saas">💻 SaaS / App</option>
+                        <option value="fitness">💪 Fitness</option>
+                        <option value="beauty">✨ Beauty</option>
+                        <option value="finance">💰 Finance</option>
+                        <option value="food">🍕 Food</option>
+                        <option value="course">📚 Course / Education</option>
+                        <option value="gaming">🎮 Gaming</option>
+                        <option value="home">🏠 Home</option>
+                      </select>
+                    </div>
                     {[
                       { key: "product", label: "Product / Service", placeholder: "e.g. Desaire - AI girlfriend app" },
                       { key: "audience", label: "Target Audience", placeholder: "e.g. Single men 18-35" },
@@ -725,26 +798,41 @@ function GenerateButton({
   free = false,
   onClick,
   disabled,
+  isGenerating = false,
 }: {
   cost: number;
   unit: string;
   free?: boolean;
   onClick: () => void;
   disabled: boolean;
+  isGenerating?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       disabled={disabled}
-      className="flex items-center gap-1.5 px-3.5 py-2 rounded-full bg-[#7B2D26] text-white text-[12px] font-medium hover:bg-[#8f3830] disabled:opacity-40 transition-all shadow-lg"
+      className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full text-white text-[12px] font-medium transition-all shadow-lg ${
+        isGenerating
+          ? "bg-purple/60 cursor-wait"
+          : "bg-[#7B2D26] hover:bg-[#8f3830] disabled:opacity-40"
+      }`}
     >
-      <div className="w-4 h-4 rounded-full bg-amber-400 flex items-center justify-center shrink-0">
-        <Coins className="w-2.5 h-2.5 text-amber-900" />
-      </div>
-      <span className="font-semibold">
-        {free ? "Free" : cost}
-      </span>
-      <ArrowUp className="w-3.5 h-3.5" />
+      {isGenerating ? (
+        <>
+          <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin shrink-0" />
+          <span className="font-semibold">Generating...</span>
+        </>
+      ) : (
+        <>
+          <div className="w-4 h-4 rounded-full bg-amber-400 flex items-center justify-center shrink-0">
+            <Coins className="w-2.5 h-2.5 text-amber-900" />
+          </div>
+          <span className="font-semibold">
+            {free ? "Free" : cost}
+          </span>
+          <ArrowUp className="w-3.5 h-3.5" />
+        </>
+      )}
     </button>
   );
 }
