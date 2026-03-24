@@ -76,6 +76,7 @@ export default function HomePage() {
 
   // Generation state
   const [isGenerating, setIsGenerating] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [results, setResults] = useState<Result[]>([]);
   const [credits, setCredits] = useState(50);
   const resultsRef = useRef<HTMLDivElement>(null);
@@ -281,14 +282,15 @@ export default function HomePage() {
 
     try {
       if (activeTab === "script") {
-        // Parse prompt for script params
+        // Use detailed script fields if available, fallback to prompt
+        const sf = (settings.scriptFields || {}) as Record<string, string>;
         const scriptData = await generateScript({
-          product: prompt,
-          audience: "Target audience",
-          outcome: "Drive conversions",
-          differentiator: "Unique value",
-          proof: "Social proof",
-          speed: "normal",
+          product: sf.product || prompt || "Product",
+          audience: sf.audience || "Target audience",
+          outcome: sf.outcome || "Drive conversions",
+          differentiator: sf.differentiator || "Unique value",
+          proof: sf.proof || "Social proof",
+          speed: sf.speed || "normal",
         });
         setResults((prev) => [
           ...prev,
@@ -388,7 +390,9 @@ export default function HomePage() {
       }
     } catch (err) {
       console.error("Generation failed:", err);
+      setErrorMsg(err instanceof Error ? err.message : "Generation failed. Please try again.");
       setIsGenerating(false);
+      setTimeout(() => setErrorMsg(null), 8000);
     }
   };
 
@@ -555,6 +559,19 @@ export default function HomePage() {
                 <div className="mb-6">
                   <ModeTabs activeTab={activeTab} onTabChange={setActiveTab} />
                 </div>
+
+                {errorMsg && (
+                  <div className="mx-auto max-w-[680px] mb-4 p-4 bg-red-500/10 border border-red-500/20 rounded-xl text-red-400 text-sm">
+                    ⚠️ {errorMsg}
+                  </div>
+                )}
+
+                {isGenerating && (
+                  <div className="mx-auto max-w-[680px] mb-4 p-4 bg-purple/10 border border-purple/20 rounded-xl text-purple text-sm flex items-center gap-3">
+                    <div className="w-4 h-4 border-2 border-purple border-t-transparent rounded-full animate-spin" />
+                    Generating... This may take 10-30 seconds.
+                  </div>
+                )}
 
                 {results.map((r) => {
                   switch (r.result.kind) {

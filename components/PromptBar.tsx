@@ -92,12 +92,6 @@ export interface PromptSettings {
   sceneDirection?: string;
   positivePrompt?: string;
   negativePrompt?: string;
-  audioSource?: {
-    type: string;
-    script?: string;
-    voiceId?: string;
-    voiceName?: string;
-  };
   scriptFields?: {
     product: string;
     audience: string;
@@ -105,6 +99,12 @@ export interface PromptSettings {
     differentiator: string;
     proof: string;
     speed: string;
+  };
+  audioSource?: {
+    type: string;
+    script?: string;
+    voiceId?: string;
+    voiceName?: string;
   };
 }
 
