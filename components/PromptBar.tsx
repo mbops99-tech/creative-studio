@@ -504,7 +504,7 @@ export default function PromptBar({
   const renderModelDropdown = () => (
     <>
       <div className="fixed inset-0 z-40" onClick={() => setShowModelDropdown(false)} />
-      <div className="absolute bottom-full left-0 mb-2 z-50 w-[300px] bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden animate-fade-in">
+      <div className="absolute bottom-full left-0 mb-3 z-50 w-[320px] bg-[#1a1a1a] border border-[#2a2a2a] rounded-xl shadow-2xl overflow-hidden" style={{ boxShadow: '0 -8px 30px rgba(0,0,0,0.5)' }}>
         {currentModels.map((model) => (
           <button
             key={model.id}
@@ -551,7 +551,7 @@ export default function PromptBar({
     <>
       <div className="w-full max-w-[680px] mx-auto">
         <div
-          className={`bg-[#1a1a1a] border rounded-2xl overflow-hidden transition-colors ${
+          className={`bg-[#1a1a1a] border rounded-2xl overflow-visible transition-colors ${
             isGenerating
               ? "border-purple/50 pulse-glow"
               : "border-[#2a2a2a] focus-within:border-[#444]"
