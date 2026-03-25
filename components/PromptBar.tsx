@@ -142,7 +142,12 @@ export default function PromptBar({
   const [showSceneDirection, setShowSceneDirection] = useState(false);
   const [showAdditionalPrompts, setShowAdditionalPrompts] = useState(false);
   const [showAudioModal, setShowAudioModal] = useState(false);
-  const [quantity, setQuantity] = useState(1);
+  const [quantity, setQuantity] = useState(activeTab === "image" ? 4 : 1);
+
+  // Update default quantity when tab changes
+  useEffect(() => {
+    setQuantity(activeTab === "image" ? 4 : 1);
+  }, [activeTab]);
 
   const [settings, setSettings] = useState<PromptSettings>({
     orientation: "portrait",
@@ -190,7 +195,7 @@ export default function PromptBar({
 
   const placeholders: Record<ModeTab, string> = {
     script: "Describe your product and target audience for a UGC ad script...",
-    "talking-avatar": "Describe the video you want to create. You can also drop or paste images directly here.",
+    "talking-avatar": "Describe how you want your avatar to act...",
     image: "Describe the image you want to create...",
     more: "Describe what you want to create...",
   };
